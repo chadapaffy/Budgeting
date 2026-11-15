@@ -437,8 +437,6 @@ button.link { background: none; border: 0; padding: 0; color: var(--primary); cu
 .doc .doc-two th[colspan] { text-align: left; }
 .doc .doc-two tbody th { width: 62%; }
 .doc .num-cell { display: block; text-align: right; font-variant-numeric: tabular-nums; }
-.doc .doa-title { margin: 0 0 6px; font-size: 12px; }
-.doc .doa-hit td { background: #eef6ee; font-weight: 600; }
 .doc .center { text-align: center; font-size: 15px; }
 .doc .signs small { color: #444; }
 .doc .neg { color: #b00; }
@@ -771,7 +769,6 @@ input.locked { background: var(--surface-2, #f3f4f6); color: var(--muted, #6b728
 .memo-edit .memo-signoff .mf { display: inline-block; width: calc(100% - 1.2rem); }
 .memo-edit .mf-row { display: flex; gap: .4rem; align-items: center; }
 .memo-edit .mf-add { margin: calc(-1 * var(--s-2)) 0 var(--s-3); }
-.memo-edit .memo-doa textarea.mf { margin-top: var(--s-1); }
 .memo-edit .mf-note { font-size: 12px; color: #6b7280; text-indent: 0; margin-top: calc(-1 * var(--s-2)); }
 @media print { .memo-edit .mf { border: 0; background: none; } }
 

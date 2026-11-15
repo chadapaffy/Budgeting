@@ -79,8 +79,8 @@
   const memoDefaultFor = (code) => (code === 'PCC' ? 'cross' : '');
   /** ผู้ลงนามใน Memo ตั้งต้น (ข้อความตัวอย่างทั่วไป ใส่ชื่อ/ตำแหน่งจริงที่ข้อมูลหลัก > ผู้ลงนาม Memo) */
   const MEMO_PARTY_SAMPLE = {
-    PBI: { to: 'ผู้บริหารสูงสุด PBI (ตัวอย่าง)', cc: 'บัญชี / การเงิน PBI (ตัวอย่าง)', reviewer: 'ผู้บริหารฝ่ายการเงิน PBI (ตัวอย่าง)', signer: 'กรรมการผู้จัดการ PBI (ตัวอย่าง)', doa: '' },
-    PCC: { to: 'ผู้บริหารสูงสุด PCC (ตัวอย่าง)', cc: 'บัญชี / การเงิน PCC (ตัวอย่าง)', reviewer: 'ผู้บริหารฝ่ายการเงิน PCC (ตัวอย่าง)', signer: 'กรรมการผู้จัดการ PCC (ตัวอย่าง)', doa: '' }
+    PBI: { to: 'ผู้บริหารสูงสุด PBI (ตัวอย่าง)', cc: 'บัญชี / การเงิน PBI (ตัวอย่าง)', reviewer: 'ผู้บริหารฝ่ายการเงิน PBI (ตัวอย่าง)', signer: 'กรรมการผู้จัดการ PBI (ตัวอย่าง)' },
+    PCC: { to: 'ผู้บริหารสูงสุด PCC (ตัวอย่าง)', cc: 'บัญชี / การเงิน PCC (ตัวอย่าง)', reviewer: 'ผู้บริหารฝ่ายการเงิน PCC (ตัวอย่าง)', signer: 'กรรมการผู้จัดการ PCC (ตัวอย่าง)' }
   };
   const TYPE_LABEL = { CAPEX: 'งบลงทุน (CAPEX)', CBS: 'งบดำเนินงาน (OPEX)' };
   /** ชื่อย่อที่แสดง: รหัสภายใน 'CBS' แสดงเป็น OPEX */
@@ -124,30 +124,6 @@
   const CBS_STATUS = ['Plan', 'On Progress', 'แล้วเสร็จ'];
   const ASSET_TYPES = ['เครื่องจักร', 'เครื่องมือและอุปกรณ์', 'อาคารและสิ่งปลูกสร้าง', 'ยานพาหนะ', 'อุปกรณ์สำนักงาน', 'ซอฟต์แวร์', 'อื่นๆ'];
 
-  /** ตารางอำนาจอนุมัติ (DOA) ตามแบบฟอร์มใบเบิกงบประมาณเดิม — m = จำนวนเงิน (ล้านบาท) */
-  const DOA = {
-    '2.4': {
-      title: '2.4 การทำรายการได้มา/จำหน่ายไปซึ่งสินทรัพย์ (เช่น ที่ดิน, อาคาร, เครื่องจักร, เงินลงทุน เป็นต้น)',
-      short: '2.4 สินทรัพย์ลงทุน (ที่ดิน อาคาร เครื่องจักร)',
-      rows: [
-        { code: '2.4.4.2.2 (1)', label: 'มากกว่า 30 ลบ. แต่ไม่ถึง 50 ลบ.', approver: 'BOD', match: (m) => m > 30 && m < 50 },
-        { code: '2.4.4.2.2 (2)', label: 'มากกว่า 1 ลบ. แต่ไม่ถึง 30 ลบ.', approver: 'CEO', match: (m) => m > 1 && m <= 30 },
-        { code: '2.4.4.2.2 (3)', label: 'น้อยกว่า 1 ลบ.', approver: 'COO/MD', match: (m) => m <= 1 }
-      ]
-    },
-    '2.5': {
-      title: '2.5 การทำรายการได้มา/จำหน่ายไปซึ่งสินทรัพย์ที่ใช้ในการดำเนินงานทั่วไป ที่เป็นไปตามงบประมาณที่ได้รับอนุมัติแล้ว (อุปกรณ์เครื่องใช้สำนักงาน, งานปรับปรุงซ่อมบำรุงพื้นที่ อาคาร ยานพาหนะ เป็นต้น)',
-      short: '2.5 สินทรัพย์ดำเนินงานทั่วไป (อุปกรณ์สำนักงาน ซ่อมบำรุง ยานพาหนะ)',
-      rows: [
-        { code: '2.5(1)', label: 'มากกว่าหรือเท่ากับ 0.5 ลบ.', approver: 'BOD', match: (m) => m >= 0.5 },
-        { code: '2.5(2)', label: 'มากกว่า 0.1 ลบ. แต่น้อยกว่า 0.5 ลบ.', approver: 'CEO', match: (m) => m > 0.1 && m < 0.5 },
-        { code: '2.5(3)', label: 'มากกว่า 0.05 ลบ. แต่น้อยกว่าหรือเท่ากับ 0.1 ลบ.', approver: 'COO/MD/CTO/CFO (ตามสายบังคับบัญชา)', match: (m) => m > 0.05 && m <= 0.1 },
-        { code: '2.5(4)', label: 'มากกว่า 0.01 ลบ. แต่น้อยกว่าหรือเท่ากับ 0.05 ลบ.', approver: 'SDM/DM', match: (m) => m > 0.01 && m <= 0.05 },
-        { code: '2.5(5)', label: 'น้อยกว่าหรือเท่ากับ 0.01 ลบ.', approver: 'SSM/SM', match: (m) => m <= 0.01 }
-      ]
-    }
-  };
-
   // ---------------------------------------------------------------- storage
 
   const DEFAULT_GROUP_NAMES = { '01': 'สายการผลิต', '02': 'สาธารณูปโภค', '04': 'คลังสินค้าและโลจิสติกส์' };
@@ -183,7 +159,7 @@
     companies.forEach((c) => { if (!MEMO_MODES.some(([v]) => v === c.memo)) c.memo = memoDefaultFor(c.code); });
     const memoParties = list('memoParties').slice();
     companies.forEach((c) => {
-      if (!memoParties.some((x) => x.code === c.code)) memoParties.push(Object.assign({ code: c.code, to: '', cc: '', reviewer: '', signer: '', doa: '' }, MEMO_PARTY_SAMPLE[c.code] || {}));
+      if (!memoParties.some((x) => x.code === c.code)) memoParties.push(Object.assign({ code: c.code, to: '', cc: '', reviewer: '', signer: '' }, MEMO_PARTY_SAMPLE[c.code] || {}));
     });
     d.master = { companies, departments, groups, assetTypes, glCodes, expenseCategories, memoParties, memoRule: 2 };
     return d;
@@ -233,7 +209,7 @@
     const prev = year - 1;
     const yy = String(year).slice(-2);
     const day = (m, d) => year + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
-    const item = (id, code, name, assetType, doa, amount, investor) => Object.assign({ id, code, name, assetType, doa, amount }, investor ? { investor } : {});
+    const item = (id, code, name, assetType, amount) => ({ id, code, name, assetType, amount });
     const cbs = (id, code, name, extra) => Object.assign({ id, code, name, qty: '', unit: '', amount: 0, vat: 0, glCode: '', glName: '' }, extra || {});
     const sampleFile = (name) => ({ id: 'f-' + name, slot: 'resolution', name, size: 0, sample: true, at: nowIso, by: 'req1' });
     const budgets = [
@@ -242,16 +218,16 @@
         name: 'ปรับปรุงสายการผลิต Phase 1', department: 'ฝ่ายวิศวกรรม', ownerId: 'req1', note: 'งบตัวอย่าง',
         meeting: { date: day(1, 15), no: 'มติที่ 1/' + year, note: 'ประชุมคณะกรรมการบริหาร' },
         items: [
-          item('c1', year + '-01-EN001', 'เครื่องตัดชิ้นงาน', 'เครื่องจักร', '2.4', 500000),
-          item('c2', year + '-01-EN002', 'เครื่องมือและอุปกรณ์ห้องปฏิบัติการ', 'เครื่องมือและอุปกรณ์', '2.5', 610000),
-          item('c3', year + '-01-EN003', 'ระบบลำเลียงวัตถุดิบ (Conveyor)', 'เครื่องจักร', '2.4', 1500000)
+          item('c1', year + '-01-EN001', 'เครื่องตัดชิ้นงาน', 'เครื่องจักร', 500000),
+          item('c2', year + '-01-EN002', 'เครื่องมือและอุปกรณ์ห้องปฏิบัติการ', 'เครื่องมือและอุปกรณ์', 610000),
+          item('c3', year + '-01-EN003', 'ระบบลำเลียงวัตถุดิบ (Conveyor)', 'เครื่องจักร', 1500000)
         ]
       },
       {
         id: 'b2', type: 'CAPEX', company: 'PBI', fiscalYear: year, group: '01', code: 'IT0001', structure: 'items',
         name: 'อุปกรณ์ IT สำนักงาน', department: 'ฝ่ายวิศวกรรม', ownerId: 'req1', note: '',
         meeting: { date: day(1, 15), no: 'มติที่ 1/' + year, note: '' },
-        items: [item('c4', year + '-01-IT001', 'คอมพิวเตอร์และอุปกรณ์ต่อพ่วง', 'อุปกรณ์สำนักงาน', '2.5', 450000)]
+        items: [item('c4', year + '-01-IT001', 'คอมพิวเตอร์และอุปกรณ์ต่อพ่วง', 'อุปกรณ์สำนักงาน', 450000)]
       },
       {
         id: 'b3', type: 'CBS', company: 'PBI', fiscalYear: year, group: '01', code: 'PJ0001-1', structure: 'items',
@@ -278,40 +254,40 @@
         id: 'b4', type: 'CAPEX', company: 'PBI', fiscalYear: prev, group: '02', code: 'EN0002', structure: 'items',
         name: 'ระบบไอน้ำ (ยกมาจากปีก่อน)', department: 'ฝ่ายวิศวกรรม', ownerId: 'req1', note: 'งบปีก่อน ยกมาใช้ต่อ',
         meeting: { date: prev + '-02-10', no: 'มติที่ 2/' + prev, note: '' },
-        items: [item('c5', prev + '-02-EN001', 'ชุดหม้อไอน้ำและท่อ', 'เครื่องจักร', '2.4', 800000)]
+        items: [item('c5', prev + '-02-EN001', 'ชุดหม้อไอน้ำและท่อ', 'เครื่องจักร', 800000)]
       },
       {
         id: 'b5', type: 'CAPEX', company: 'PCC', fiscalYear: year, group: '04', code: 'PD0001', structure: 'items',
         name: 'อุปกรณ์คลังสินค้า', department: 'ฝ่ายผลิต', ownerId: 'req2', note: '',
         meeting: { date: day(2, 1), no: 'มติที่ 2/' + year, note: '' },
         items: [
-          item('c6', year + '-04-PD001', 'รถยกไฟฟ้า', 'ยานพาหนะ', '2.5', 1200000),
-          item('c7', year + '-04-PD002', 'ชั้นวางสินค้า', 'อื่นๆ', '2.5', 300000)
+          item('c6', year + '-04-PD001', 'รถยกไฟฟ้า', 'ยานพาหนะ', 1200000),
+          item('c7', year + '-04-PD002', 'ชั้นวางสินค้า', 'อื่นๆ', 300000)
         ]
       },
       {
         id: 'b6', type: 'CAPEX', company: 'PBI', fiscalYear: year, group: '01', code: 'BD0001', structure: 'project',
         name: 'ปรับปรุงอาคารสำนักงาน (งบรวมโครงการ)', department: 'ฝ่ายวิศวกรรม', ownerId: 'req1', note: 'ยังไม่แยกรายการย่อย เพราะรายละเอียดยังไม่ชัดเจน',
         meeting: { date: day(3, 10), no: 'มติที่ 3/' + year, note: '' },
-        items: [item('c8', 'BD0001', 'งบรวมทั้งโครงการ', 'อาคารและสิ่งปลูกสร้าง', '2.5', 900000)]
+        items: [item('c8', 'BD0001', 'งบรวมทั้งโครงการ', 'อาคารและสิ่งปลูกสร้าง', 900000)]
       },
       {
         id: 'b7', type: 'CAPEX', company: 'PBI', fiscalYear: year + 1, group: '01', code: 'EN0003', structure: 'project', state: 'draft',
         name: 'ระบบโซลาร์รูฟท็อป', department: 'ฝ่ายวิศวกรรม', ownerId: 'req1', note: 'เตรียมเข้าที่ประชุมรอบหน้า',
-        items: [item('c10', 'EN0003', 'งบรวมทั้งโครงการ', 'เครื่องจักร', '2.4', 2500000)]
+        items: [item('c10', 'EN0003', 'งบรวมทั้งโครงการ', 'เครื่องจักร', 2500000)]
       },
       {
         id: 'b8', type: 'CAPEX', company: 'PCC', fiscalYear: year, group: '04', code: 'PD0002', structure: 'items', state: 'review',
         name: 'รถยกไฟฟ้าเพิ่มเติม', department: 'ฝ่ายผลิต', ownerId: 'req2', note: '',
         meeting: { date: day(10, 20), no: 'มติที่ 9/' + year, note: 'อนุมัติเต็มจำนวน' },
         attachments: [sampleFile('มติที่ประชุม-9-' + year + '.pdf')],
-        items: [item('c9', year + '-04-PD003', 'รถยกไฟฟ้า 2 ตัน', 'ยานพาหนะ', '2.5', 980000)]
+        items: [item('c9', year + '-04-PD003', 'รถยกไฟฟ้า 2 ตัน', 'ยานพาหนะ', 980000)]
       },
       {
         id: 'b9', type: 'CAPEX', company: 'PBI', fiscalYear: year + 1, group: '02', code: 'CP0101', structure: 'items', state: 'pending_open', setup: true,
         name: 'ระบบบำบัดน้ำเสียโรงงาน 2', department: 'ฝ่ายวิศวกรรม', ownerId: 'req1', note: 'งบประจำปี ' + (year + 1) + ' ตามแผนที่บอร์ดอนุมัติ',
         meeting: { date: day(10, 25), no: 'มติงบประจำปี ' + (year + 1), note: '' },
-        items: [item('c11', 'CP0101-01', 'ถังบำบัดและระบบเติมอากาศ', 'เครื่องจักร', '2.4', 1800000), item('c12', 'CP0101-02', 'งานโยธาและติดตั้ง', 'อาคารและสิ่งปลูกสร้าง', '2.5', 650000)]
+        items: [item('c11', 'CP0101-01', 'ถังบำบัดและระบบเติมอากาศ', 'เครื่องจักร', 1800000), item('c12', 'CP0101-02', 'งานโยธาและติดตั้ง', 'อาคารและสิ่งปลูกสร้าง', 650000)]
       },
       {
         id: 'b10', type: 'CBS', company: 'PBI', fiscalYear: year + 1, group: '03', code: 'OP0101', structure: 'items', state: 'draft',
@@ -1244,8 +1220,6 @@
       '<td><input name="itName" value="' + esc(it.name) + '" aria-label="ชื่อรายการ"></td>' +
       '<td><div class="select-wrap"><select name="itAsset" aria-label="ประเภทสินทรัพย์">' +
       optList(db.master.assetTypes, 'name', (t) => t.name, it.assetType || assetTypeList()[0]) + '</select></div></td>' +
-      '<td><div class="select-wrap"><select name="itDoa" aria-label="หมวด DOA">' + opt('2.4', '2.4 สินทรัพย์ลงทุน', it.doa) +
-      opt('2.5', '2.5 ดำเนินงานทั่วไป', it.doa || '2.5') + '</select></div></td>' +
       '<td><input name="itAmount" type="number" min="0" step="0.01" class="right" value="' + esc(it.amount) + '" aria-label="วงเงิน"></td>' +
       '<td>' + (locked ? '<span class="muted" title="มีการเบิกใช้แล้ว ลบไม่ได้">🔒</span>' : '<button type="button" class="btn small bad" data-remove-item title="ลบ">×</button>') + '</td></tr>';
   }
@@ -1347,13 +1321,12 @@
       radio('project', 'งบรวมทั้งโครงการ', 'ยังไม่แยกรายการ — ตอนใช้งบเลือกหมวดค่าใช้จ่ายแทน คุมวงเงินที่ระดับโครงการ') + '</div>' +
       '<div class="row" data-structure="project">' +
       field('วงเงินรวมทั้งโครงการ (รวม VAT)', '<input name="projAmount" type="number" min="0" step="0.01" class="right" value="' + esc(projItem.amount || '') + '">') +
-      field('หมวด DOA', select('projDoa', opt('2.4', '2.4 สินทรัพย์ลงทุน', projItem.doa) + opt('2.5', '2.5 ดำเนินงานทั่วไป', projItem.doa || '2.5')), ' data-for="CAPEX"') +
       field('ประเภทสินทรัพย์หลัก', select('projAsset', optList(db.master.assetTypes, 'name', (t) => t.name, projItem.assetType || assetTypeList()[0])), ' data-for="CAPEX"') +
       '</div></fieldset>' +
 
       '<fieldset data-for="CAPEX" data-structure="items"><legend>รายการย่อย (Item No.)</legend>' +
       '<div class="table-wrap"><table class="edit-table"><thead><tr><th style="width:11rem">รหัสรายการย่อย</th><th style="min-width:14rem">ชื่อรายการ</th>' +
-      '<th style="width:10rem">ประเภทสินทรัพย์</th><th style="width:10rem">หมวด DOA</th><th class="num" style="width:10rem">วงเงิน (รวม VAT)</th><th style="width:3rem"></th></tr></thead>' +
+      '<th style="width:10rem">ประเภทสินทรัพย์</th><th class="num" style="width:10rem">วงเงิน (รวม VAT)</th><th style="width:3rem"></th></tr></thead>' +
       '<tbody id="capexRows">' + capexItems.map((it) => capexRow(it, false)).join('') + '</tbody></table></div>' +
       '<div class="actions table-actions"><button type="button" class="btn small" data-add-row="capex">+ เพิ่มรายการย่อย</button>' +
       '<span class="muted">รวม <strong data-total="capex">0.00</strong> บาท</span></div></fieldset>' +
@@ -1465,7 +1438,6 @@
         };
         if (type === 'CAPEX') {
           it.assetType = val(tr, 'itAsset').value;
-          it.doa = val(tr, 'itDoa').value;
         } else {
           // Item หลักไม่มีจำนวน / หน่วย (กรอกที่ Item ย่อย)
           it.qty = '';
@@ -1480,7 +1452,7 @@
         // งบรวมโครงการ = รายการเดียวที่เป็นตัวโครงการ
         const old = existing && existing.structure === 'project' ? existing.items[0] : null;
         items.push(Object.assign({ id: old ? old.id : '', code: code || '-', name: 'งบรวมทั้งโครงการ', amount: round2(f.projAmount.value), vat: 0,
-          qty: '', unit: '', glCode: '', glName: '' }, type === 'CAPEX' ? { assetType: f.projAsset.value, doa: f.projDoa.value } : {}));
+          qty: '', unit: '', glCode: '', glName: '' }, type === 'CAPEX' ? { assetType: f.projAsset.value } : {}));
       }
 
       if (!items.length) errors.push('ต้องมีรายการอย่างน้อย 1 รายการ');
@@ -1719,7 +1691,7 @@
       }));
       items = '<h2>งบรวมทั้งโครงการ</h2><div class="table-wrap"><table><thead><tr><th>รายการ</th><th class="num">งบ</th>' +
         (active ? '<th class="num">ตัดงบแล้ว</th><th class="num">จองไว้</th><th class="num">คงเหลือ</th>' : '') + '</tr></thead><tbody>' +
-        '<tr><td>' + esc(it.name || 'งบรวมทั้งโครงการ') + (isCapex ? '<div class="muted">' + esc(it.assetType || '') + ' · DOA ' + esc(it.doa || '') + '</div>' : '') + '</td>' +
+        '<tr><td>' + esc(it.name || 'งบรวมทั้งโครงการ') + (isCapex ? '<div class="muted">' + esc(it.assetType || '') + '</div>' : '') + '</td>' +
         '<td class="num">' + money(budgetTotal(b)) + '</td>' +
         (active ? '<td class="num">' + money(us.used) + '</td><td class="num">' + money(us.reserved) + '</td><td class="num"><strong>' + moneyCell(us.remaining) + '</strong></td>' : '') +
         '</tr></tbody></table></div>' +
@@ -1737,7 +1709,7 @@
           const origNote = !active ? '' : !orig ? '<div class="muted">เพิ่มภายหลัง</div>'
             : orig.total !== iu.approved ? '<div class="muted">เดิม ' + money(orig.total) + '</div>' : '';
           return '<tr><td class="nowrap">' + esc(i.code) + '</td><td>' + esc(i.name) +
-            '<div class="muted">' + esc(i.assetType) + ' · DOA ' + esc(i.doa) + '</div></td>' +
+            '<div class="muted">' + esc(i.assetType) + '</div></td>' +
             '<td class="num">' + money(itemTotal(i)) + origNote + '</td>' +
             (active ? '<td class="num">' + money(iu.used) + '</td><td class="num">' + money(iu.reserved) +
               '</td><td class="num nowrap"><strong>' + moneyCell(iu.remaining) + '</strong>' + (iu.remaining < 0 ? ' <span class="badge rejected">เกินงบรายการ</span>' : '') + '</td>' : '') +
@@ -2090,7 +2062,6 @@
       background: 'ตามที่' + cname(b.company) + ' ได้รับการจัดสรรงบประมาณลงทุน (CAPEX) ประจำปี ' + b.fiscalYear + ' โครงการ ' + b.code + ' ' + b.name +
         ' ' + (b.department ? 'ของ' + b.department + ' ' : '') + 'กรอบวงเงินรวมทั้งสิ้น ' + amt(total) + (b.note ? '\n\n' + b.note : ''),
       consider: 'เพื่อให้สามารถดำเนินโครงการตามแผนได้ จึงขออนุมัติดำเนินการใช้งบประมาณโครงการ ' + b.code + ' ทั้งโครงการ ตามรายการดังนี้',
-      doaRef: '',
       signerName: userName(b.ownerId),
       signerTitle: mp.proposer || '',
       reviewers: mp.reviewers.slice(),
@@ -2139,8 +2110,6 @@
       '<tr><td></td><td colspan="2"><strong>รวมวงเงินที่ขอดำเนินการใช้งบ</strong></td><td class="num"><strong>' + money(M.total) + '</strong></td></tr></tbody></table>' +
       '<p>จึงขออนุมัติดำเนินการใช้งบประมาณ รวมเป็นเงินทั้งสิ้น ' + esc(M.amt(M.total)) + '</p>' +
       (edit ? '<p class="mf-note no-print">รายการและวงเงินดึงจากงบที่ผู้คุมงบลงไว้ — ถ้าไม่ถูกต้องให้แจ้งผู้คุมงบแก้ไขงบ</p>' : '') +
-      (edit ? '<div class="memo-doa"><strong><u>อ้างอิงอำนาจอนุมัติ</u></strong>' + area('doaRef', 2, 'อ้างอิง DOA (ถ้ามี)') + '</div>'
-        : d.doaRef ? '<p class="memo-doa"><strong><u>อ้างอิงอำนาจอนุมัติ</u></strong> ' + text(d.doaRef) + '</p>' : '') +
       '<p class="memo-close">จึงเรียนมาเพื่อโปรดพิจารณาลงนาม</p>' +
       '<div class="memo-signoff"><div>ขอแสดงความนับถือ</div><div class="memo-sig-line"></div>' +
       '<div>(' + inp('signerName', 'ชื่อผู้ลงนามเสนอ', 'mf-center') + ')</div><div>' + inp('signerTitle', 'ตำแหน่ง', 'mf-center') + '</div></div>' +
@@ -2182,7 +2151,7 @@
     { k: 'group', h: 'กลุ่มงบ', w: 9 }, { k: 'code', h: 'รหัสโครงการ', w: 14 }, { k: 'name', h: 'ชื่อโครงการ / ชื่องบ', w: 30 },
     { k: 'dept', h: 'หน่วยงาน', w: 16 }, { k: 'owner', h: 'Business เจ้าของงบ', w: 18 }, { k: 'itCode', h: 'รหัส Item', w: 12 },
     { k: 'itName', h: 'ชื่อ Item', w: 28 }, { k: 'amount', h: 'วงเงิน (รวม VAT)', w: 18, num: true },
-    { k: 'asset', h: 'ประเภทสินทรัพย์', w: 18 }, { k: 'doa', h: 'หมวด DOA (2.4/2.5)', w: 12 },
+    { k: 'asset', h: 'ประเภทสินทรัพย์', w: 18 },
     { k: 'ref', h: 'อ้างอิงการอนุมัติ (ถ้ามี)', w: 20 }, { k: 'note', h: 'หมายเหตุ', w: 24 }
   ];
   let importPreview = null; // { file, budgets: [{ data, errors, rows }] }
@@ -2324,7 +2293,6 @@
         const amount = round2(num(get(r, 'amount')));
         const it = { id: '', code: get(r, 'itCode'), name: get(r, 'itName'), amount, line };
         it.assetType = get(r, 'asset') || assetTypeList()[0] || '';
-        it.doa = get(r, 'doa') === '2.4' ? '2.4' : '2.5';
         if (!it.code || !it.name) errors.push('แถว ' + line + ': ไม่ได้ระบุรหัส / ชื่อ Item');
         if (!(amount > 0)) errors.push('แถว ' + line + ': วงเงินต้องมากกว่า 0');
         return it;
@@ -2348,16 +2316,16 @@
     const co = (db.master.companies[0] || {}).code || '';
     const dept = (db.master.departments[0] || {}).name || '';
     const rows = [
-      ['CAPEX', co, y, '01', 'CP-' + y + '-01', 'ตัวอย่าง: เครื่องจักรสายการผลิตใหม่', dept, ownerA, 'CP-' + y + '-01-01', 'เครื่องจักรหลัก', 1500000, assetTypeList()[0] || '', '2.4', '', '', ''],
-      ['CAPEX', co, y, '01', 'CP-' + y + '-01', 'ตัวอย่าง: เครื่องจักรสายการผลิตใหม่', dept, ownerA, 'CP-' + y + '-01-02', 'งานติดตั้ง', 300000, assetTypeList()[0] || '', '2.5', '', '', ''],
-      ['CAPEX', co, y, '02', 'CP-' + y + '-02', 'ตัวอย่าง: ปรับปรุงอาคารคลังสินค้า', dept, ownerA, 'CP-' + y + '-02-01', 'งานก่อสร้าง', 500000, assetTypeList()[0] || '', '2.5', '', '', '']
+      ['CAPEX', co, y, '01', 'CP-' + y + '-01', 'ตัวอย่าง: เครื่องจักรสายการผลิตใหม่', dept, ownerA, 'CP-' + y + '-01-01', 'เครื่องจักรหลัก', 1500000, assetTypeList()[0] || '', '', ''],
+      ['CAPEX', co, y, '01', 'CP-' + y + '-01', 'ตัวอย่าง: เครื่องจักรสายการผลิตใหม่', dept, ownerA, 'CP-' + y + '-01-02', 'งานติดตั้ง', 300000, assetTypeList()[0] || '', '', ''],
+      ['CAPEX', co, y, '02', 'CP-' + y + '-02', 'ตัวอย่าง: ปรับปรุงอาคารคลังสินค้า', dept, ownerA, 'CP-' + y + '-02-01', 'งานก่อสร้าง', 500000, assetTypeList()[0] || '', '', '']
     ];
     const guide = [
       ['1 แถว = 1 Item · แถวที่ "รหัสโครงการ" เดียวกันรวมเป็นงบเดียวกัน (ข้อมูลระดับงบใช้จากแถวแรกของโครงการ)'],
       ['ประเภทงบ: CAPEX เท่านั้น (งบ OPEX ให้ Business เป็นผู้สร้างและส่งอนุมัติเอง) · บริษัท: รหัสบริษัทตามข้อมูลหลัก (' + db.master.companies.map((c) => c.code).join(', ') + ')'],
       ['Business เจ้าของงบ: ชื่อ หรือรหัสผู้ใช้ (' + USERS.filter(canRequestUser).map((u) => u.name).join(', ') + ')'],
       ['หน่วยงาน: ตามข้อมูลหลัก (' + db.master.departments.map((d) => d.name).join(', ') + ')'],
-      ['วงเงินรวม VAT · ประเภทสินทรัพย์ / หมวด DOA (2.4 สินทรัพย์ลงทุน / 2.5 ดำเนินงานทั่วไป)'],
+      ['วงเงินรวม VAT · ประเภทสินทรัพย์ (ตามข้อมูลหลัก)'],
       ['หลัง Import งบจะอยู่สถานะ "ยังไม่เปิดใช้งบ" — Business ต้องทำ Memo ให้ผู้บริหารเซ็น แนบไฟล์ แล้วผู้คุมงบตรวจและยืนยัน'],
       ['บันทึกเป็น .xlsx หรือ .csv (UTF-8) ก็ได้']
     ];
@@ -2853,7 +2821,7 @@
 
   const EXPORT_SHEETS = [
     ['budgets', 'งบประมาณ', 'สรุปรายงบ: งบอนุมัติ ตัดงบแล้ว จองไว้ คงเหลือ'],
-    ['items', 'Item', 'รายการ Item ของแต่ละงบ พร้อม GL / ประเภทสินทรัพย์ / DOA และยอดคงเหลือ'],
+    ['items', 'Item', 'รายการ Item ของแต่ละงบ พร้อม GL / ประเภทสินทรัพย์ และยอดคงเหลือ'],
     ['requests', 'เบิกใช้งบ', 'คำขอ / ใบเบิกใช้งบ: เลขที่ ประเภท สถานะ ยอดเงิน ยอดตัดงบ ปิดยอด'],
     ['lines', 'รายการในใบ', 'บรรทัดในใบเบิกใช้งบ: Item / หมวด / GL / บริษัทที่ลงทุน / ยอดเงิน'],
     ['cuts', 'ตัดงบ-จ่ายเงิน', 'การตัดงบ: PO / เคลียร์เงินทดรอง / จ่ายคืนพนักงาน / จ่าย Supplier'],
@@ -2883,12 +2851,12 @@
     budgets.forEach((b) => sortedItems(b).forEach((it) => {
       const own = b.type !== 'CBS' || hasOwnBudget(b, it);
       const u = own ? usage(b, it.id) : null;
-      itemRows.push([b.company, T(b.type), b.code, it.code, it.name, b.type === 'CBS' ? depth(it) + 1 : 1, it.assetType || '', it.doa || '', itemGl(b, it).code, itemGl(b, it).name,
+      itemRows.push([b.company, T(b.type), b.code, it.code, it.name, b.type === 'CBS' ? depth(it) + 1 : 1, it.assetType || '', itemGl(b, it).code, itemGl(b, it).name,
         it.qty === '' || it.qty == null ? '' : Number(it.qty), it.unit || '', own ? round2(Number(it.amount || 0)) : '', own ? round2(Number(it.vat || 0)) : '', own ? itemTotal(it) : '',
         u ? u.used : '', u ? u.reserved : '', u ? u.remaining : '', own ? '' : 'ใช้วงเงิน Item ' + (budgetNodeOf(b, it) || {}).code]);
     }));
     add('items', [S('บริษัท', 8), S('ประเภทงบ', 9), S('รหัสโครงการ'), S('รหัส Item', 16), S('ชื่อรายการ', 32), { h: 'ระดับ', w: 7, num: true }, S('ประเภทสินทรัพย์', 16),
-      S('หมวด DOA', 9), S('GL Code', 10), S('GL Name', 20), { h: 'จำนวน', w: 9, num: true }, S('หน่วย', 8), N('ก่อน VAT'), N('VAT'), N('งบ (รวม VAT)'), N('ตัดงบแล้ว'), N('จองไว้'), N('คงเหลือ'), S('หมายเหตุ', 20)], itemRows);
+      S('GL Code', 10), S('GL Name', 20), { h: 'จำนวน', w: 9, num: true }, S('หน่วย', 8), N('ก่อน VAT'), N('VAT'), N('งบ (รวม VAT)'), N('ตัดงบแล้ว'), N('จองไว้'), N('คงเหลือ'), S('หมายเหตุ', 20)], itemRows);
 
     add('requests', [S('เลขที่คำขอ', 15), S('เลขที่เอกสาร', 16), S('เลขที่ Memo', 16), S('บริษัท', 8), S('ประเภทงบ', 9), S('รหัสโครงการ'), S('ประเภทการใช้งบ', 22), S('สถานะ', 20),
       S('ผู้ขอ', 16), S('วันที่ขอ', 11), S('วันที่อนุมัติ', 11), S('วัตถุประสงค์', 34), S('Supplier / ผู้รับเงิน', 22), S('PO No.', 14), N('ก่อน VAT'), N('VAT'), N('รวม'),
@@ -3052,7 +3020,7 @@
     const tr = (k, v) => '<tr><th style="width:30%">' + k + '</th><td>' + v + '</td></tr>';
     const rows = b.structure === 'project'
       ? '<tr><td>1</td><td>งบรวมทั้งโครงการ (ยังไม่แยกรายการย่อย)</td><td class="num">' + money(budgetTotal(b)) + '</td></tr>'
-      : ledgerItems(b).map((i, n) => '<tr><td>' + (n + 1) + '</td><td>' + esc(i.code + ' ' + i.name) + (isCapex ? '<br><small>' + esc(i.assetType) + ' · DOA ' + esc(i.doa) + '</small>' : '') +
+      : ledgerItems(b).map((i, n) => '<tr><td>' + (n + 1) + '</td><td>' + esc(i.code + ' ' + i.name) + (isCapex ? '<br><small>' + esc(i.assetType) + '</small>' : '') +
         '</td><td class="num">' + money(itemTotal(i)) + '</td></tr>').join('');
     return '<div class="actions no-print" style="margin:0 0 1rem"><button class="btn primary" onclick="window.print()">พิมพ์ / บันทึกเป็น PDF</button></div>' +
       '<div class="alert info no-print">แบบฟอร์มชั่วคราว — จะปรับตามแบบฟอร์มจริงที่ทีมผู้ใช้ส่งมา</div>' +
@@ -3524,11 +3492,6 @@
 
   /** Item ที่คำขอนี้ใช้ (ใบเดียวใช้ได้หลาย Item ทั้ง CAPEX และ OPEX) */
   const reqItems = (b, r) => reqItemIds(r).map((id) => itemById(b, id)).filter(Boolean);
-  /** Item ที่ใช้อ้างอิงหมวด DOA (CAPEX): Item ที่ขอใช้ยอดมากที่สุดในใบ */
-  function reqDoaItem(b, r) {
-    const items = reqItems(b, r);
-    return items.sort((x, y) => linesAmount(r, [y.id]) - linesAmount(r, [x.id]))[0] || null;
-  }
   function itemCodesCell(b, r) {
     const items = reqItems(b, r);
     if (!items.length) return '-';
@@ -4054,7 +4017,6 @@
     const ids = capexItems.length ? uniq([].concat(...capexItems.map((x) => leafIdsUnder(b, x)))) : null;
     const scopeCodes = capexItems.map((x) => x.code).join(', ');
     const scopeNames = capexItems.map((x) => x.code + ' ' + x.name).join(', ');
-    const doaItem = b.type === 'CAPEX' && perLine ? reqDoaItem(b, r) : null;
 
     // บริษัทที่ลงทุน (ถ้ามีหลายบริษัท ใช้บริษัทที่ลงทุนมากที่สุดเป็นผู้พิจารณา)
     const byInv = {};
@@ -4094,14 +4056,6 @@
       ? (ap.exec ? 'เอกสารอนุมัติจากผู้บริหาร เลขที่ ' + m.no + (m.by ? ' (ผู้อนุมัติ: ' + m.by + ')' : '') : 'มติที่ประชุม ' + m.no) + (m.date ? ' วันที่ ' + fmtDay(m.date) : '')
       : 'งบ ' + b.code + ' ' + b.name;
 
-    // อำนาจอนุมัติ: ของบริษัทที่ลงทุน (ข้อมูลหลัก) หรือคำนวณจากตาราง DOA (CAPEX แยกรายการ)
-    let doaText = approver.doa || '';
-    if (!doaText && doaItem && DOA[doaItem.doa]) {
-      const tbl = DOA[doaItem.doa];
-      const row = tbl.rows.find((x) => x.match(r.amount / 1e6));
-      doaText = 'ตาม' + tbl.title + (row ? ' — ' + row.code + ' ' + row.label + ' · ผู้อนุมัติ: ' + row.approver : '');
-    }
-
     const amt = (v) => money(v) + ' บาท (' + bahtText(v) + ')';
     const items = b.structure === 'project' ? [] : leaves(b);
     const background = 'สืบเนื่องจาก' + refText + ' ได้อนุมัติงบ ' + b.code + ' ' + b.name + ' กรอบวงเงิน' +
@@ -4119,7 +4073,6 @@
       ref: refText,
       background,
       consider,
-      doaRef: doaText,
       signerName: userName(r.requesterId),
       signerTitle: mp.proposer || '',
       reviewers: mp.reviewers.slice(),
@@ -4127,7 +4080,7 @@
     };
     return { b, r, cname, seq, approved, priorRows, after, groups, invCodes, byInv, scopeCodes, capexItems, amt, defaults };
   }
-  const MEMO_DOC_KEYS = ['to', 'date', 'cc', 'subject', 'ref', 'background', 'consider', 'doaRef', 'signerName', 'signerTitle', 'reviewers', 'approvers'];
+  const MEMO_DOC_KEYS = ['to', 'date', 'cc', 'subject', 'ref', 'background', 'consider', 'signerName', 'signerTitle', 'reviewers', 'approvers'];
   /** ค่าที่ใช้ใน Memo: ค่าที่ผู้ขอกรอกไว้ (r.memoDoc) ทับค่าเริ่มต้นจากระบบ */
   function memoDocOf(model) {
     const saved = model.r.memoDoc || {};
@@ -4138,7 +4091,7 @@
 
   /**
    * Memo ตามโครงแบบฟอร์มจริงของบริษัท — edit = แสดงเป็นช่องกรอกในตำแหน่งเดียวกับเอกสาร
-   * ช่องที่กรอกได้: เรียน · วันที่ · สำเนาถึง · เรื่อง · อ้างอิง · 1. เรื่องสืบเนื่อง · 2. เรื่องเพื่อพิจารณาลงนาม · อ้างอิงอำนาจอนุมัติ ·
+   * ช่องที่กรอกได้: เรียน · วันที่ · สำเนาถึง · เรื่อง · อ้างอิง · 1. เรื่องสืบเนื่อง · 2. เรื่องเพื่อพิจารณาลงนาม ·
    * ผู้ลงนามเสนอ · ผู้ทบทวน · ผู้พิจารณาอนุมัติ — ส่วนยอดเงินและตารางสรุประบบคำนวณจากคำขอ (แก้ที่คำขอ)
    */
   function memoHtml(b, r, edit) {
@@ -4196,8 +4149,6 @@
       cell(g.map((x) => money(x.amount)).join('<br>')) + '</tr>' +
       '<tr><td></td><td><strong>งบประมาณคงเหลือหลังการเบิกใช้ ครั้งที่ ' + M.seq + '</strong></td>' + cell('<strong>' + moneyCell(M.after) + '</strong>') + '</tr></tbody></table>' +
       '<p>จึงขอเบิกใช้งบ ครั้งที่ ' + M.seq + ' รวมเป็นเงินทั้งสิ้น ' + esc(M.amt(r.amount)) + '</p>' +
-      (edit ? '<div class="memo-doa"><strong><u>อ้างอิงอำนาจอนุมัติ</u></strong>' + area('doaRef', 3, 'อ้างอิง DOA (ฉบับ / ข้อ / ผู้เห็นชอบ / ผู้อนุมัติ)') + '</div>'
-        : d.doaRef ? '<p class="memo-doa"><strong><u>อ้างอิงอำนาจอนุมัติ</u></strong> ' + text(d.doaRef) + '</p>' : '') +
 
       '<p class="memo-close">จึงเรียนมาเพื่อโปรดพิจารณาลงนาม</p>' +
       '<div class="memo-signoff"><div>ขอแสดงความนับถือ</div><div class="memo-sig-line"></div>' +
@@ -4315,20 +4266,6 @@
     return { approved, before, now, after: round2(approved - before - now) };
   }
 
-  function doaTable(cat, amount) {
-    const t = DOA[cat] || DOA['2.5'];
-    const m = amount / 1e6;
-    const hit = t.rows.findIndex((row) => row.match(m));
-    return '<div class="section"><h2>อำนาจอนุมัติ อ้างอิงตามตารางอำนาจอนุมัติ (DOA)</h2>' +
-      '<p class="doa-title">' + esc(t.title) + '</p><table><thead><tr><th style="width:2rem"></th><th>เงื่อนไข</th><th>ผู้อนุมัติ</th>' +
-      '<th style="width:28%">ลงชื่อผู้อนุมัติ</th><th style="width:16%">วันที่อนุมัติ</th></tr></thead><tbody>' +
-      t.rows.map((row, i) => '<tr' + (i === hit ? ' class="doa-hit"' : '') + '><td class="center">' + (i === hit ? '☑' : '☐') + '</td>' +
-        '<td>' + esc(row.code + ' ' + row.label) + '</td><td>' + esc(row.approver) + '</td><td></td><td></td></tr>').join('') +
-      '</tbody></table>' +
-      (hit < 0 ? '<p class="note">ยอดเงินเกินวงเงินในตาราง DOA — ต้องเสนอคณะกรรมการตามระเบียบ</p>'
-        : '<p class="note">ระบบเลือกระดับผู้อนุมัติตามจำนวนเงินที่ขอใช้ครั้งนี้ (' + money(amount) + ' บาท)</p>') + '</div>';
-  }
-
   function viewDocument(id) {
     const r = requestById(id);
     if (!r) return notFound();
@@ -4337,7 +4274,6 @@
     const b = budgetById(r.budgetId);
     const isCapex = r.type === 'CAPEX';
     const perItem = b.structure !== 'project';
-    const doaItem = isCapex && perItem ? reqDoaItem(b, r) || {} : {};
     const proj = balanceAt(r, b, null);
     const tr = (k, v) => '<tr><th style="width:34%">' + k + '</th><td>' + v + '</td></tr>';
     const balanceTable = (title, bal) => '<table><thead><tr><th colspan="2">' + title + '</th></tr></thead><tbody>' +
@@ -4405,7 +4341,7 @@
     return '<div class="actions no-print" style="margin:0 0 1rem">' +
       '<button class="btn primary" onclick="window.print()">พิมพ์ / บันทึกเป็น PDF</button></div>' +
       '<article class="doc">' + head + info + detail + lines +
-      (isCapex ? doaTable(doaItem.doa, r.amount) : '') + signs +
+      signs +
       '<p class="note">' + (r.useType !== 'prpo'
         ? 'ใช้เลขที่ ' + esc(r.docNo) + ' อ้างอิงในเอกสารการจ่าย / เคลียร์เงิน · ' + esc((USE_TYPES[r.useType] || {}).cut || '')
         : 'โปรดแนบเอกสารฉบับนี้ และระบุเลขที่ ' + esc(r.docNo) + ' ในใบขอซื้อ (PR) ที่เกี่ยวข้อง · ยอดขอซื้อรวมต้องไม่เกิน ' + money(r.amount) + ' บาท') + '</p>' +
@@ -4642,11 +4578,10 @@
       cols: [{ k: 'name', label: 'หมวดค่าใช้จ่าย' }, { k: 'gl', label: 'GL Code (ถ้ามี)', w: '12rem' }],
       inUse: (it) => db.requests.some((r) => r.lines.some((l) => l.category === it.name)),
       rename: (from, to) => db.requests.forEach((r) => r.lines.forEach((l) => { if (l.category === from) l.category = to; })) },
-    { key: 'memoParties', title: 'ผู้ลงนามและอำนาจอนุมัติใน Memo', lock: true,
-      hint: 'ใช้พิมพ์ Memo ขอเบิกใช้งบ ตั้งรายบริษัท — "เรียน / สำเนาถึง / ผู้ทบทวน / อ้างอิงอำนาจอนุมัติ" ใช้ของ <strong>บริษัทที่ลงทุน</strong> (ถ้าคำขอมีหลายบริษัทใช้ของบริษัทที่ลงทุนมากที่สุด) · "ผู้ลงนามเสนอ" ใช้ของ <strong>บริษัทเจ้าของงบ</strong> · ใช้เป็น <strong>ค่าเริ่มต้น</strong> ในฟอร์มคำขอ (ผู้ขอแก้ได้ต่อคำขอ) · ข้อมูลในโหมดทดลองเก็บในเบราว์เซอร์นี้เท่านั้น',
+    { key: 'memoParties', title: 'ผู้ลงนามใน Memo', lock: true,
+      hint: 'ใช้พิมพ์ Memo ขอเบิกใช้งบ ตั้งรายบริษัท — "เรียน / สำเนาถึง / ผู้ทบทวน" ใช้ของ <strong>บริษัทที่ลงทุน</strong> (ถ้าคำขอมีหลายบริษัทใช้ของบริษัทที่ลงทุนมากที่สุด) · "ผู้ลงนามเสนอ" ใช้ของ <strong>บริษัทเจ้าของงบ</strong> · ใช้เป็น <strong>ค่าเริ่มต้น</strong> ในฟอร์มคำขอ (ผู้ขอแก้ได้ต่อคำขอ) · ข้อมูลในโหมดทดลองเก็บในเบราว์เซอร์นี้เท่านั้น',
       cols: [{ k: 'code', label: 'บริษัท', w: '7rem' }, { k: 'to', label: 'เรียน / ผู้พิจารณาอนุมัติ (หลายคนคั่นด้วย ;)', w: '15rem' }, { k: 'cc', label: 'สำเนาถึง (หลายคนคั่นด้วย ;)', w: '13rem' },
-        { k: 'reviewer', label: 'ผู้ทบทวน / ให้ความเห็นชอบ (หลายคนคั่นด้วย ;)', w: '15rem' }, { k: 'signer', label: 'ผู้ลงนามเสนอ (ชื่อ / ตำแหน่ง)', w: '15rem' },
-        { k: 'doa', label: 'อ้างอิงอำนาจอนุมัติ (DOA)', w: '16rem' }],
+        { k: 'reviewer', label: 'ผู้ทบทวน / ให้ความเห็นชอบ (หลายคนคั่นด้วย ;)', w: '15rem' }, { k: 'signer', label: 'ผู้ลงนามเสนอ (ชื่อ / ตำแหน่ง)', w: '15rem' }],
       inUse: () => false },
     { key: 'glCodes', title: 'GL Code (OPEX)', hint: 'เลือก GL Code ในรายการต้นทุน แล้วระบบเติมชื่อ GL ให้', lock: true,
       cols: [{ k: 'code', label: 'GL Code', w: '10rem' }, { k: 'name', label: 'ชื่อ GL' }],
@@ -4656,7 +4591,7 @@
 
   /** เมนูย่อยของข้อมูลหลัก: [key, ชื่อเมนู] */
   const MASTER_NAV = [['companies', 'บริษัท'], ['departments', 'หน่วยงาน'], ['groups', 'กลุ่มงบประมาณ'], ['assetTypes', 'ประเภทสินทรัพย์'],
-    ['expenseCategories', 'หมวดค่าใช้จ่าย'], ['glCodes', 'GL Code'], ['memoParties', 'ผู้ลงนาม Memo'], ['doa', 'ตารางอำนาจอนุมัติ (DOA)']];
+    ['expenseCategories', 'หมวดค่าใช้จ่าย'], ['glCodes', 'GL Code'], ['memoParties', 'ผู้ลงนาม Memo']];
 
   function masterRow(sec, it, isNew) {
     return '<tr data-orig="' + (isNew ? '' : esc(it[sec.cols[0].k])) + '">' + sec.cols.map((c, i) => (c.type === 'image'
@@ -4684,11 +4619,8 @@
       '<template>' + masterRow(sec, {}, true) + '</template>' +
       '<div class="actions"><button type="button" class="btn" data-m-add>+ เพิ่ม</button><button class="btn primary" type="submit">บันทึก' + sec.title + '</button></div></form></section>').join('');
 
-    const doa = Object.keys(DOA).map((k) => '<h3 class="side-title">' + esc(DOA[k].short) + '</h3><div class="table-wrap"><table><thead><tr><th>ข้อ</th><th>วงเงิน</th><th>ผู้อนุมัติ</th></tr></thead><tbody>' +
-      DOA[k].rows.map((r) => '<tr><td class="nowrap">' + esc(r.code) + '</td><td>' + esc(r.label) + '</td><td>' + esc(r.approver) + '</td></tr>').join('') + '</tbody></table></div>').join('');
     return '<div class="page-head"><div><h1>' + esc(navTitle) + '</h1><div class="page-sub">ข้อมูลหลัก — ค่าที่ใช้เป็นตัวเลือกในฟอร์มและรายงาน</div></div></div>' + takeFlash() +
       '<div id="formError"></div><div class="form-main">' + sections +
-      (key === 'doa' ? '<section class="card form-section"><div class="section-head"><div><h2 class="section-title">ตารางอำนาจอนุมัติ (DOA)</h2><div class="muted section-hint">อ่านอย่างเดียว — ใช้ติ๊กระดับผู้อนุมัติบนใบเบิกใช้งบ CAPEX ตามยอดเงิน (หน่วย: ล้านบาท)</div></div></div>' + doa + '</section>' : '') +
       '</div>';
   }
 
@@ -5126,7 +5058,7 @@
           c.lines.forEach((l) => {
             if (l.itemId === 'new') {
               const it = { id: nextId('i'), code: l.code, name: l.name, amount: l.amount, vat: 0, qty: '', unit: '', glCode: '', glName: '' };
-              if (b.type === 'CAPEX') Object.assign(it, { assetType: assetTypeList()[0], doa: '2.5' });
+              if (b.type === 'CAPEX') Object.assign(it, { assetType: assetTypeList()[0] });
               b.items.push(it);
               l.itemId = it.id;
             } else {
@@ -5457,6 +5389,7 @@
   /** สมมติฐานที่ใช้ในต้นแบบรอบนี้ — รอทีมผู้ใช้ยืนยัน */
   function viewAssumptions() {
     const rows = [
+      ['ระบบ', 'DOA (อำนาจอนุมัติ)', 'ตัดออกจากระบบก่อน — ตรวจสอบกันเองแบบ Manual: CAPEX ผู้คุมงบนำงบที่ผ่านการอนุมัติแล้วมาลงให้ Business เปิดใช้ · OPEX Business ส่งผู้อนุมัติตามที่ตนรู้เซ็นเอง แล้วแนบเอกสารเปิดใช้งบ · ไม่มีหมวด DOA ใน Item, ไม่มีตาราง DOA ในใบเบิกใช้งบ, ไม่มีช่อง "อ้างอิงอำนาจอนุมัติ" ใน Memo, ไม่มีเมนู "ตารางอำนาจอนุมัติ" ในข้อมูลหลัก'],
       ['ระบบ', 'Admin ทำอะไรได้', 'ดูแลข้อมูลหลัก ดู Log ทั้งระบบ และจัดการผู้ใช้/สิทธิ์ · ดูงบได้ทั้งหมดแต่ไม่ทำรายการ'],
       ['ระบบ', 'ผู้ใช้ทั่วไปเห็นประวัติแค่ไหน', 'เห็น "ประวัติการทำรายการ" ที่ตนทำ และที่ผู้อื่นทำกับงบ/เอกสารของตน (ไม่เห็น Log ทั้งระบบ)'],
       ['ตั้งงบ', 'Journey งบประจำปี', 'CAPEX: ผู้คุมงบลงงบของแต่ละปี (กดสร้าง หรือ Import Excel) → งบรอ Business เจ้าของงบเปิดใช้ครั้งแรก (เปิดทั้งงบทีเดียว) → Business ทำ Memo ขอดำเนินการใช้งบ ให้ผู้บริหารเซ็น แนบไฟล์ที่เซ็นแล้วส่ง → ผู้คุมงบตรวจ Memo แล้วยืนยัน (หรือส่งกลับให้แก้) · ผู้คุมงบแก้ / ยกเลิกงบที่ลงไว้ได้จนกว่า Business ส่ง Memo หรือขอดำเนินการใช้งบ · OPEX: Business เป็นผู้สร้างงบเอง (ผู้คุมงบลง / Import OPEX ไม่ได้) — ดูแถว "OPEX Business สร้างและส่งอนุมัติเอง"'],
@@ -5474,7 +5407,7 @@
       ['ระบบ', 'ส่งออกข้อมูล (Excel)', 'เมนู "ส่งออกข้อมูล (Excel)" สำหรับผู้คุมงบและ Admin (สิทธิ์ data.export) · กรองปีงบ / บริษัท / ประเภทงบ · แผ่นงาน: งบประมาณ, Item, เบิกใช้งบ, รายการในใบ, ตัดงบ-จ่ายเงิน, ปรับงบ (INC/TRF/DEC), Plan Cashflow · ตัวเลขเป็นตัวเลขจริงใน Excel (รวม/กรองได้) · รอยืนยันกับฝ่ายบัญชีว่าต้องการคอลัมน์ / รูปแบบเพิ่มเติม (เช่น รูปแบบนำเข้าระบบบัญชี)'],
       ['OPEX', 'GL Code', 'ไม่บังคับตอนตั้งงบ / เพิ่ม Item ย่อย — ฝ่ายบัญชี (ผู้คุมงบ) ใส่ทีหลังได้ทุกเมื่อที่ปุ่ม "ใส่ GL Code" ในหน้างบ · Item ย่อยที่เว้นว่างใช้ GL ของ Item แม่ · ใบเบิกใช้งบที่ยังไม่มี GL แสดง GL ล่าสุดของ Item (รวมถึงใน Excel) · หน้างบแจ้งเตือน Item หลักที่ยังไม่มี GL'],
       ['CAPEX', 'Plan Cashflow', 'หลังงบอนุมัติ (เปิดใช้แล้ว) Business เจ้าของงบหรือผู้คุมงบ ประมาณการว่าแต่ละ Item จะใช้เงินเดือนไหนเท่าไร (รวม VAT) ตามเดือนของปีงบประมาณ · รวมของแต่ละ Item ต้องไม่เกินวงเงิน Item · ไม่บังคับก่อนขอใช้งบ (แจ้งเตือนในหน้างบ) · แสดงเทียบกับยอดตัดงบจริงรายเดือน · แก้ได้ตลอด เก็บประวัติ'],
-      ['ใช้งบ', 'ใบเบิกใช้งบ 1 ใบใช้ได้หลาย Item ไหม', 'ได้ ทั้ง CAPEX และ OPEX — เลือก Item ทีละบรรทัด · ตรวจเกินงบทีละ Item และทั้งโครงการ · ตัดงบแบ่งตามสัดส่วนยอดของแต่ละ Item · DOA ของ CAPEX อ้างอิงหมวดของ Item ที่ขอใช้ยอดมากที่สุดในใบ'],
+      ['ใช้งบ', 'ใบเบิกใช้งบ 1 ใบใช้ได้หลาย Item ไหม', 'ได้ ทั้ง CAPEX และ OPEX — เลือก Item ทีละบรรทัด · ตรวจเกินงบทีละ Item และทั้งโครงการ · ตัดงบแบ่งตามสัดส่วนยอดของแต่ละ Item'],
       ['ใช้งบ', 'ขอเกินงบรายการย่อยแต่ไม่เกินงบโครงการ', 'ขอได้ ระบบเตือน ผู้คุมงบต้องใส่ Note'],
       ['ใช้งบ', 'ขอเกินงบโครงการ', 'อนุมัติไม่ได้จนกว่าผู้คุมงบโยกงบเข้า หรือส่งกลับให้ขอเพิ่มงบ'],
       ['ใช้งบ', 'ผู้ขอต้องใส่เหตุผลที่ขอเกินไหม', 'ไม่บังคับ (มีช่องให้ใส่)'],
@@ -5485,8 +5418,8 @@
       ['ใช้งบ', 'จ่ายหลายงวด', 'ใช้ได้กับ PR/PO และจ่ายตรง — บันทึกจ่ายหลายครั้งแล้วปิดยอด'],
       ['ใช้งบ', 'เงื่อนไขการทำ Memo', 'ทำ Memo เฉพาะงบ CAPEX ที่ใช้เงินข้ามบริษัทกับ PCC (เกิดได้เฉพาะงบรวมทั้งโครงการที่ไม่มี Item เพราะ Item ไม่มีช่องบริษัทที่ลงทุนแล้ว): งบของ PCC ที่มีบรรทัดซึ่งบริษัทอื่นเป็นบริษัทที่ลงทุน หรืองบของบริษัทอื่นที่มีบรรทัดซึ่ง PCC เป็นบริษัทที่ลงทุน · นอกนั้นไม่ต้องทำ Memo (ส่งตรงให้ผู้คุมงบ) · OPEX ไม่ใช้ Memo · ปุ่มในฟอร์มเปลี่ยนตามบริษัทที่ลงทุนของแต่ละบรรทัด'],
       ['ใช้งบ', 'ตั้งเกณฑ์ Memo รายบริษัท', 'ข้อมูลหลัก > บริษัท > เกณฑ์ Memo: "ใช้เงินข้ามบริษัทกับบริษัทนี้" (ตั้งต้นเฉพาะ PCC) หรือ "ไม่ต้องใช้" · ต้องแนบไฟล์ Memo ที่เซ็นแล้วก่อนส่ง · ทุกประเภทการใช้งบและทุกยอดเงิน · ผู้บริหารเซ็นนอกระบบ'],
-      ['ใช้งบ', 'แบบฟอร์ม Memo', 'ออกตามแบบฟอร์ม Memo จริงของบริษัท: เรียน/สำเนาถึง/เรื่อง/อ้างอิง → 1. เรื่องสืบเนื่อง → 2. เรื่องเพื่อพิจารณาลงนาม (ยอดเงินเป็นตัวอักษร) → ตารางสรุปงบ (กรอบงบ − เบิกไปแล้ว − ขอครั้งนี้ = คงเหลือ) → อ้างอิงอำนาจอนุมัติ → ตารางทบทวน/ผู้พิจารณาอนุมัติ · หัวกระดาษ: โลโก้ของบริษัท (ตั้งต้นใช้โลโก้กลุ่มบริษัท · อัปโหลดโลโก้เฉพาะบริษัทได้ที่ ข้อมูลหลัก > บริษัท) และคำว่า Memo ชิดขวา · ตารางหัว (เรียน/วันที่-เลขที่, เรื่อง, สำเนาถึง, อ้างอิง) กว้างกว่าเนื้อความ มีแต่เส้นแนวนอน · ยังไม่ทำเลขหน้าและแถบสีท้ายกระดาษ'],
-      ['ใช้งบ', 'กรอก Memo อย่างไร', 'กด "ทำ Memo" ในฟอร์มคำขอ → ระบบออกเลขที่ Memo แล้วเปิดหน้า Memo ที่เป็นโครงแบบฟอร์มจริง มีช่องกรอกในตำแหน่งเดียวกับเอกสาร: เรียน · วันที่ · สำเนาถึง · เรื่อง · อ้างอิง · 1. เรื่องสืบเนื่อง · 2. เรื่องเพื่อพิจารณาลงนาม · อ้างอิงอำนาจอนุมัติ · ผู้ลงนามเสนอ (ชื่อ/ตำแหน่ง) · ผู้ทบทวน · ผู้พิจารณาอนุมัติ (เพิ่ม/ลบแถวได้) · ค่าเริ่มต้นดึงจากคำขอและ ข้อมูลหลัก > ผู้ลงนาม Memo ของบริษัทที่ลงทุน · ยอดเงิน รายการ และตารางสรุปงบ ระบบคำนวณจากคำขอ (แก้ที่คำขอ) · แก้ Memo ได้จนกว่าจะแนบฉบับที่เซ็นแล้วและส่งให้ผู้คุมงบ'],
+      ['ใช้งบ', 'แบบฟอร์ม Memo', 'ออกตามแบบฟอร์ม Memo จริงของบริษัท: เรียน/สำเนาถึง/เรื่อง/อ้างอิง → 1. เรื่องสืบเนื่อง → 2. เรื่องเพื่อพิจารณาลงนาม (ยอดเงินเป็นตัวอักษร) → ตารางสรุปงบ (กรอบงบ − เบิกไปแล้ว − ขอครั้งนี้ = คงเหลือ) → ตารางทบทวน/ผู้พิจารณาอนุมัติ · หัวกระดาษ: โลโก้ของบริษัท (ตั้งต้นใช้โลโก้กลุ่มบริษัท · อัปโหลดโลโก้เฉพาะบริษัทได้ที่ ข้อมูลหลัก > บริษัท) และคำว่า Memo ชิดขวา · ตารางหัว (เรียน/วันที่-เลขที่, เรื่อง, สำเนาถึง, อ้างอิง) กว้างกว่าเนื้อความ มีแต่เส้นแนวนอน · ยังไม่ทำเลขหน้าและแถบสีท้ายกระดาษ'],
+      ['ใช้งบ', 'กรอก Memo อย่างไร', 'กด "ทำ Memo" ในฟอร์มคำขอ → ระบบออกเลขที่ Memo แล้วเปิดหน้า Memo ที่เป็นโครงแบบฟอร์มจริง มีช่องกรอกในตำแหน่งเดียวกับเอกสาร: เรียน · วันที่ · สำเนาถึง · เรื่อง · อ้างอิง · 1. เรื่องสืบเนื่อง · 2. เรื่องเพื่อพิจารณาลงนาม · ผู้ลงนามเสนอ (ชื่อ/ตำแหน่ง) · ผู้ทบทวน · ผู้พิจารณาอนุมัติ (เพิ่ม/ลบแถวได้) · ค่าเริ่มต้นดึงจากคำขอและ ข้อมูลหลัก > ผู้ลงนาม Memo ของบริษัทที่ลงทุน · ยอดเงิน รายการ และตารางสรุปงบ ระบบคำนวณจากคำขอ (แก้ที่คำขอ) · แก้ Memo ได้จนกว่าจะแนบฉบับที่เซ็นแล้วและส่งให้ผู้คุมงบ'],
       ['ใช้งบ', 'ค่าเริ่มต้นของเรื่องสืบเนื่อง / อ้างอิง', 'เรื่องสืบเนื่อง = ข้อความอ้างอิงงบและกรอบวงเงิน (ผู้ขอแก้/เพิ่มย่อหน้าเองได้) · อ้างอิง = มติที่ประชุม (CAPEX) / เอกสารอนุมัติผู้บริหาร (OPEX) ของงบ · "ครั้งที่" นับจากคำขอก่อนหน้าของงบเดียวกัน'],
       ['ใช้งบ', 'ใครเลือกว่าทำ Memo', 'ผู้ขอเลือกเองด้วยปุ่ม "ทำ Memo" ข้างปุ่มส่ง · ถ้าเกณฑ์ของบริษัทบังคับ (ตั้งต้น: งบที่ไม่มี Item) จะมีแค่ปุ่มทำ Memo'],
       ['ใช้งบ', 'ขั้นตอน Memo', 'บันทึกคำขอ → ระบบออกเลขที่ Memo (MEMO-บริษัทปี-ลำดับ) และจองงบไว้ → ผู้ขอพิมพ์ไปให้ผู้บริหารเซ็น → แนบไฟล์ที่เซ็นแล้ว + ชื่อผู้บริหาร → ส่งให้ผู้คุมงบ · แก้ไขคำขอระหว่างรอได้ (ต้องเซ็นใหม่ ใช้เลขที่เดิม)'],
