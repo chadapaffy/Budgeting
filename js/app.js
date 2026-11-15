@@ -189,12 +189,8 @@
     return d;
   }
   const companyMap = () => Object.fromEntries(db.master.companies.map((c) => [c.code, c.name]));
-  /** บริษัทที่ลงทุน: Item กำหนดเอง (ค่าตั้งต้น = บริษัทเจ้าของงบ) · งบที่ไม่มี Item เลือกรายบรรทัดตอนขอเบิกใช้งบ */
-  const itemInvestor = (b, it) => {
-    let n = it;
-    while (n) { if (n.investor) return n.investor; n = b.type === 'CBS' ? parentOf(b, n) : null; }
-    return b.company;
-  };
+  /** บริษัทที่ลงทุน: ทุก Item ใช้งบของบริษัทเจ้าของงบ (ไม่มีการใช้งบข้ามบริษัทราย Item) · งบที่ไม่มี Item เลือกรายบรรทัดตอนขอเบิกใช้งบ */
+  const itemInvestor = (b) => b.company;
   const lineInvestor = (b, l) => l.investor || (b.structure === 'project' ? b.company : itemInvestor(b, itemById(b, l.itemId)));
   const investorSelect = (name, selected, label) => '<div class="select-wrap"><select name="' + name + '" aria-label="' + (label || 'บริษัทที่ลงทุน') + '">' +
     optList(db.master.companies, 'code', (c) => c.code, selected) + '</select></div>';
@@ -247,7 +243,7 @@
         meeting: { date: day(1, 15), no: 'มติที่ 1/' + year, note: 'ประชุมคณะกรรมการบริหาร' },
         items: [
           item('c1', year + '-01-EN001', 'เครื่องตัดชิ้นงาน', 'เครื่องจักร', '2.4', 500000),
-          item('c2', year + '-01-EN002', 'เครื่องมือและอุปกรณ์ห้องปฏิบัติการ', 'เครื่องมือและอุปกรณ์', '2.5', 610000, 'PCC'),
+          item('c2', year + '-01-EN002', 'เครื่องมือและอุปกรณ์ห้องปฏิบัติการ', 'เครื่องมือและอุปกรณ์', '2.5', 610000),
           item('c3', year + '-01-EN003', 'ระบบลำเลียงวัตถุดิบ (Conveyor)', 'เครื่องจักร', '2.4', 1500000)
         ]
       },
@@ -1250,7 +1246,6 @@
       optList(db.master.assetTypes, 'name', (t) => t.name, it.assetType || assetTypeList()[0]) + '</select></div></td>' +
       '<td><div class="select-wrap"><select name="itDoa" aria-label="หมวด DOA">' + opt('2.4', '2.4 สินทรัพย์ลงทุน', it.doa) +
       opt('2.5', '2.5 ดำเนินงานทั่วไป', it.doa || '2.5') + '</select></div></td>' +
-      '<td>' + investorSelect('itInv', it.investor) + '</td>' +
       '<td><input name="itAmount" type="number" min="0" step="0.01" class="right" value="' + esc(it.amount) + '" aria-label="วงเงิน"></td>' +
       '<td>' + (locked ? '<span class="muted" title="มีการเบิกใช้แล้ว ลบไม่ได้">🔒</span>' : '<button type="button" class="btn small bad" data-remove-item title="ลบ">×</button>') + '</td></tr>';
   }
@@ -1263,7 +1258,6 @@
       '<td class="center"><input name="itVat" type="checkbox"' + (Number(it.vat) > 0 ? ' checked' : '') + ' aria-label="VAT 7%"></td>' +
       '<td><input name="itGl" list="glList" value="' + esc(it.glCode) + '" aria-label="GL Code"></td>' +
       '<td><input name="itGlName" value="' + esc(it.glName) + '" aria-label="GL Name"></td>' +
-      '<td>' + investorSelect('itInv', it.investor) + '</td>' +
       '<td>' + (locked ? '<span class="muted" title="มีการเบิกใช้แล้ว ลบไม่ได้">🔒</span>' : '<button type="button" class="btn small bad" data-remove-item title="ลบ">×</button>') + '</td></tr>';
   }
 
@@ -1359,8 +1353,8 @@
 
       '<fieldset data-for="CAPEX" data-structure="items"><legend>รายการย่อย (Item No.)</legend>' +
       '<div class="table-wrap"><table class="edit-table"><thead><tr><th style="width:11rem">รหัสรายการย่อย</th><th style="min-width:14rem">ชื่อรายการ</th>' +
-      '<th style="width:10rem">ประเภทสินทรัพย์</th><th style="width:10rem">หมวด DOA</th><th style="width:7rem">บริษัทที่ลงทุน</th><th class="num" style="width:10rem">วงเงิน (รวม VAT)</th><th style="width:3rem"></th></tr></thead>' +
-      '<tbody id="capexRows">' + capexItems.map((it) => capexRow(Object.assign({}, it, { investor: it.investor || v.company }), false)).join('') + '</tbody></table></div>' +
+      '<th style="width:10rem">ประเภทสินทรัพย์</th><th style="width:10rem">หมวด DOA</th><th class="num" style="width:10rem">วงเงิน (รวม VAT)</th><th style="width:3rem"></th></tr></thead>' +
+      '<tbody id="capexRows">' + capexItems.map((it) => capexRow(it, false)).join('') + '</tbody></table></div>' +
       '<div class="actions table-actions"><button type="button" class="btn small" data-add-row="capex">+ เพิ่มรายการย่อย</button>' +
       '<span class="muted">รวม <strong data-total="capex">0.00</strong> บาท</span></div></fieldset>' +
 
@@ -1368,8 +1362,8 @@
       '<p class="muted small-note">งบ OPEX ต้องมี Item — กรอก <strong>Item หลัก</strong> (รหัส 1, 2, 3 …) พร้อมวงเงินของแต่ละ Item (ไม่ต้องกรอกจำนวน/หน่วย) · <strong>Item ย่อย</strong> 2 ระดับ (1.1 และ 1.1.1) พร้อมจำนวน/หน่วย เพิ่มได้เรื่อย ๆ ภายหลังเมื่องบเปิดใช้แล้ว ที่หน้ารายละเอียดงบ (วงเงินรวมไม่เกิน Item หลัก และจะกำหนดวงเงินหรือไม่ก็ได้)</p>' +
       '<div class="table-wrap"><table class="edit-table"><thead><tr><th style="width:5.5rem">รหัส</th><th style="min-width:12rem">รายการ</th>' +
       '<th class="num" style="width:9rem">ก่อน VAT</th><th style="width:4rem">VAT 7%</th>' +
-      '<th style="width:7rem">GL Code <small class="muted">(บัญชีใส่ทีหลังได้)</small></th><th style="width:10rem">GL Name</th><th style="width:7rem">บริษัทที่ลงทุน</th><th style="width:3rem"></th></tr></thead>' +
-      '<tbody id="cbsRows">' + cbsItems.map((it) => cbsRow(Object.assign({}, it, { investor: it.investor || v.company }), false)).join('') + '</tbody></table></div>' +
+      '<th style="width:7rem">GL Code <small class="muted">(บัญชีใส่ทีหลังได้)</small></th><th style="width:10rem">GL Name</th><th style="width:3rem"></th></tr></thead>' +
+      '<tbody id="cbsRows">' + cbsItems.map((it) => cbsRow(it, false)).join('') + '</tbody></table></div>' +
       '<div class="actions table-actions"><button type="button" class="btn small" data-add-row="cbs">+ เพิ่มรายการ</button>' +
       '<span class="muted">รวม (รวม VAT) <strong data-total="cbs">0.00</strong> บาท</span></div></fieldset>' +
 
@@ -1411,13 +1405,6 @@
       recalc();
     };
     typeSel.addEventListener('change', sync);
-    // เปลี่ยนบริษัทเจ้าของงบ: แถวที่ยังใช้บริษัทเดิมเป็นผู้ลงทุน เปลี่ยนตามให้
-    let prevCompany = form.elements.company.value;
-    form.elements.company.addEventListener('change', () => {
-      const now = form.elements.company.value;
-      form.querySelectorAll('[name="itInv"]').forEach((sel) => { if (sel.value === prevCompany) sel.value = now; });
-      prevCompany = now;
-    });
     form.querySelectorAll('[name="structure"]').forEach((el) => el.addEventListener('change', sync));
     form.addEventListener('input', recalc);
     form.addEventListener('change', (e) => {
@@ -1447,8 +1434,8 @@
           if (!isNaN(n)) { last[last.length - 1] = String(n + 1); code = last.join('.'); }
         }
         tbody.insertAdjacentHTML('beforeend', kind === 'cbs'
-          ? cbsRow({ code, name: '', amount: '', investor: form.elements.company.value }, false)
-          : capexRow({ code: '', name: '', amount: '', investor: form.elements.company.value }, false));
+          ? cbsRow({ code, name: '', amount: '' }, false)
+          : capexRow({ code: '', name: '', amount: '' }, false));
         recalc();
       }
     });
@@ -1474,8 +1461,7 @@
           id: tr.dataset.itemId || '',
           code: val(tr, 'itCode').value.trim(),
           name: val(tr, 'itName').value.trim(),
-          amount: round2(val(tr, 'itAmount').value),
-          investor: val(tr, 'itInv') ? val(tr, 'itInv').value : f.company.value
+          amount: round2(val(tr, 'itAmount').value)
         };
         if (type === 'CAPEX') {
           it.assetType = val(tr, 'itAsset').value;
@@ -1751,7 +1737,7 @@
           const origNote = !active ? '' : !orig ? '<div class="muted">เพิ่มภายหลัง</div>'
             : orig.total !== iu.approved ? '<div class="muted">เดิม ' + money(orig.total) + '</div>' : '';
           return '<tr><td class="nowrap">' + esc(i.code) + '</td><td>' + esc(i.name) +
-            '<div class="muted">' + esc(i.assetType) + ' · DOA ' + esc(i.doa) + ' · ลงทุนโดย ' + esc(itemInvestor(b, i)) + '</div></td>' +
+            '<div class="muted">' + esc(i.assetType) + ' · DOA ' + esc(i.doa) + '</div></td>' +
             '<td class="num">' + money(itemTotal(i)) + origNote + '</td>' +
             (active ? '<td class="num">' + money(iu.used) + '</td><td class="num">' + money(iu.reserved) +
               '</td><td class="num nowrap"><strong>' + moneyCell(iu.remaining) + '</strong>' + (iu.remaining < 0 ? ' <span class="badge rejected">เกินงบรายการ</span>' : '') + '</td>' : '') +
@@ -1772,7 +1758,7 @@
           const qty = (i.qty || i.unit) ? '<div class="muted">' + esc((i.qty ? Number(i.qty).toLocaleString('th-TH') : '') + ' ' + (i.unit || '')) + '</div>' : '';
           const alloc = childrenOf(b, i).length && own ? '<div class="muted">จัดสรรให้ Item ย่อย ' + money(allocatedOf(b, i)) + ' · ยังไม่จัดสรร ' + money(round2(itemTotal(i) - allocatedOf(b, i))) + '</div>' : '';
           return '<tr class="' + (main ? 'parent-row' : '') + '"><td class="nowrap">' + esc(i.code) + '</td>' +
-            '<td style="padding-left:' + (0.75 + depth(i) * 1.1) + 'rem">' + esc(i.name) + qty + '<div class="muted">ลงทุนโดย ' + esc(itemInvestor(b, i)) + '</div>' + alloc + '</td>' +
+            '<td style="padding-left:' + (0.75 + depth(i) * 1.1) + 'rem">' + esc(i.name) + qty + alloc + '</td>' +
             '<td>' + (i.glCode ? esc(i.glCode) + '<div class="muted">' + esc(i.glName) + '</div>' : itemGl(b, i).code ? '<span class="muted">ตาม ' + esc(itemGl(b, i).code) + '</span>' : isMainItem(b, i) ? '<span class="muted">รอบัญชี</span>' : '') + '</td>' +
             '<td class="num">' + (own ? money(itemTotal(i)) : '<span class="muted">ไม่กำหนดวงเงิน</span>') + '</td>' +
             (active ? '<td class="num">' + money(iu.used) + '</td><td class="num">' + money(iu.reserved) + '</td>' +
@@ -2148,7 +2134,7 @@
       (edit ? area('consider', 3, 'ความประสงค์ในการขอดำเนินการใช้งบ') : '<div class="memo-text">' + paras(d.consider) + '</div>') +
       '<table class="memo-sum"><thead><tr><th style="width:3rem">ลำดับ</th><th>รายการ</th><th style="width:9rem">ประเภทสินทรัพย์</th><th class="num" style="width:9rem">วงเงิน (บาท)</th></tr></thead><tbody>' +
       rows.map((it, i) => '<tr><td class="center">' + (i + 1) + '</td><td>' + esc(it.code + ' ' + it.name) +
-        (it.investor && it.investor !== b.company ? '<br><small>ลงทุนโดย ' + esc(it.investor) + '</small>' : '') + '</td><td>' + esc(it.assetType || '') + '</td>' +
+        '</td><td>' + esc(it.assetType || '') + '</td>' +
         '<td class="num">' + money(it.amount !== undefined && M.items.length ? itemTotal(it) : it.amount) + '</td></tr>').join('') +
       '<tr><td></td><td colspan="2"><strong>รวมวงเงินที่ขอดำเนินการใช้งบ</strong></td><td class="num"><strong>' + money(M.total) + '</strong></td></tr></tbody></table>' +
       '<p>จึงขออนุมัติดำเนินการใช้งบประมาณ รวมเป็นเงินทั้งสิ้น ' + esc(M.amt(M.total)) + '</p>' +
@@ -2197,7 +2183,6 @@
     { k: 'dept', h: 'หน่วยงาน', w: 16 }, { k: 'owner', h: 'Business เจ้าของงบ', w: 18 }, { k: 'itCode', h: 'รหัส Item', w: 12 },
     { k: 'itName', h: 'ชื่อ Item', w: 28 }, { k: 'amount', h: 'วงเงิน (รวม VAT)', w: 18, num: true },
     { k: 'asset', h: 'ประเภทสินทรัพย์', w: 18 }, { k: 'doa', h: 'หมวด DOA (2.4/2.5)', w: 12 },
-    { k: 'inv', h: 'บริษัทที่ลงทุน (ถ้าต่างจากบริษัท)', w: 14 },
     { k: 'ref', h: 'อ้างอิงการอนุมัติ (ถ้ามี)', w: 20 }, { k: 'note', h: 'หมายเหตุ', w: 24 }
   ];
   let importPreview = null; // { file, budgets: [{ data, errors, rows }] }
@@ -2337,12 +2322,11 @@
       if (!get(r0, 'name')) errors.push('ไม่ได้ระบุชื่อโครงการ');
       const items = g.rows.map(({ line, r }) => {
         const amount = round2(num(get(r, 'amount')));
-        const it = { id: '', code: get(r, 'itCode'), name: get(r, 'itName'), amount, investor: get(r, 'inv') || company, line };
+        const it = { id: '', code: get(r, 'itCode'), name: get(r, 'itName'), amount, line };
         it.assetType = get(r, 'asset') || assetTypeList()[0] || '';
         it.doa = get(r, 'doa') === '2.4' ? '2.4' : '2.5';
         if (!it.code || !it.name) errors.push('แถว ' + line + ': ไม่ได้ระบุรหัส / ชื่อ Item');
         if (!(amount > 0)) errors.push('แถว ' + line + ': วงเงินต้องมากกว่า 0');
-        if (it.investor !== company && !db.master.companies.some((c) => c.code === it.investor)) errors.push('แถว ' + line + ': ไม่พบบริษัทที่ลงทุน "' + it.investor + '"');
         return it;
       });
       const dup = items.map((x) => x.code).filter((c, i, a) => c && a.indexOf(c) !== i);
@@ -2478,8 +2462,6 @@
       '<td><input name="siAmount" type="number" min="0" step="0.01" class="right" value="' + esc(it.amount || '') + '" placeholder="ไม่กำหนด" aria-label="วงเงินก่อน VAT เว้นว่าง = ไม่กำหนด"></td>' +
       '<td class="center"><input name="siVat" type="checkbox"' + (Number(it.vat) > 0 ? ' checked' : '') + ' aria-label="VAT 7%"></td>' +
       '<td><input name="siGl" list="glList" value="' + esc(it.glCode || '') + '" aria-label="GL Code"></td>' +
-      '<td><div class="select-wrap"><select name="siInv" aria-label="บริษัทที่ลงทุน"><option value="">ตาม Item แม่</option>' +
-      optList(db.master.companies, 'code', (c) => c.code, it.investor || '') + '</select></div></td>' +
       '<td class="nowrap">' + (lv === 1 ? '<button type="button" class="btn small" data-add-child title="เพิ่ม Item ย่อยระดับถัดไป (เช่น 1.1.1)">+ ย่อย</button> ' : '') +
       (locked ? '<span class="muted" title="มีการขอใช้แล้ว ลบไม่ได้">🔒</span>' : '<button type="button" class="btn small bad" data-remove-sub title="ลบ">×</button>') + '</td></tr>';
   }
@@ -2497,7 +2479,7 @@
         '<div class="muted section-hint">วงเงิน Item หลัก <strong>' + money(itemTotal(m)) + '</strong> บาท · จัดสรรให้ Item ย่อยแล้ว <strong data-alloc>0.00</strong> · ยังไม่จัดสรร <strong data-free>0.00</strong></div></div>' +
         '<button type="button" class="btn" data-add-sub="' + esc(m.id) + '">+ เพิ่ม Item ย่อย</button></div>' +
         '<div class="table-wrap"><table class="edit-table"><thead><tr><th style="width:8.5rem">รหัส</th><th style="min-width:12rem">รายการ</th><th style="width:6rem">จำนวน</th><th style="width:5.5rem">หน่วย</th>' +
-        '<th class="num" style="width:9rem">วงเงินก่อน VAT</th><th style="width:4rem">VAT 7%</th><th style="width:7rem">GL Code <small class="muted">(ไม่บังคับ)</small></th><th style="width:8rem">บริษัทที่ลงทุน</th><th style="width:6.5rem"></th></tr></thead>' +
+        '<th class="num" style="width:9rem">วงเงินก่อน VAT</th><th style="width:4rem">VAT 7%</th><th style="width:7rem">GL Code <small class="muted">(ไม่บังคับ)</small></th><th style="width:6.5rem"></th></tr></thead>' +
         '<tbody>' + subs.map((x) => subItemRow(b, x, itemInUse(b, x))).join('') + '</tbody></table></div>' +
         '</section>';
     }).join('');
@@ -2521,7 +2503,7 @@
       const q = (n) => tr.querySelector('[name="' + n + '"]');
       const amount = round2(q('siAmount').value);
       return { tr, id: tr.dataset.itemId || '', code: q('siCode').value.trim(), name: q('siName').value.trim(), qty: q('siQty').value === '' ? '' : Number(q('siQty').value),
-        unit: q('siUnit').value.trim(), amount, vat: q('siVat').checked ? round2(amount * VAT_RATE) : 0, glCode: q('siGl').value.trim(), investor: q('siInv').value };
+        unit: q('siUnit').value.trim(), amount, vat: q('siVat').checked ? round2(amount * VAT_RATE) : 0, glCode: q('siGl').value.trim() };
     }).filter((r) => r.code || r.name || r.amount);
     /** งบทั้งหมดหลังแก้: Item หลัก + Item ย่อยทุกระดับจากฟอร์ม */
     const draftItems = () => {
@@ -2627,7 +2609,6 @@
         Object.assign(target, { code: r.code, name: r.name, qty: r.qty, unit: r.unit, amount: r.amount, vat: r.vat, glCode: r.glCode });
         const g = db.master.glCodes.find((x) => x.code === r.glCode);
         target.glName = g ? g.name : (target.glName || '');
-        if (r.investor) target.investor = r.investor; else delete target.investor;
       };
       sections().forEach((sec) => {
         readRows(sec).forEach((r) => {
@@ -2902,11 +2883,11 @@
     budgets.forEach((b) => sortedItems(b).forEach((it) => {
       const own = b.type !== 'CBS' || hasOwnBudget(b, it);
       const u = own ? usage(b, it.id) : null;
-      itemRows.push([b.company, T(b.type), b.code, it.code, it.name, b.type === 'CBS' ? depth(it) + 1 : 1, itemInvestor(b, it), it.assetType || '', it.doa || '', itemGl(b, it).code, itemGl(b, it).name,
+      itemRows.push([b.company, T(b.type), b.code, it.code, it.name, b.type === 'CBS' ? depth(it) + 1 : 1, it.assetType || '', it.doa || '', itemGl(b, it).code, itemGl(b, it).name,
         it.qty === '' || it.qty == null ? '' : Number(it.qty), it.unit || '', own ? round2(Number(it.amount || 0)) : '', own ? round2(Number(it.vat || 0)) : '', own ? itemTotal(it) : '',
         u ? u.used : '', u ? u.reserved : '', u ? u.remaining : '', own ? '' : 'ใช้วงเงิน Item ' + (budgetNodeOf(b, it) || {}).code]);
     }));
-    add('items', [S('บริษัท', 8), S('ประเภทงบ', 9), S('รหัสโครงการ'), S('รหัส Item', 16), S('ชื่อรายการ', 32), { h: 'ระดับ', w: 7, num: true }, S('บริษัทที่ลงทุน', 12), S('ประเภทสินทรัพย์', 16),
+    add('items', [S('บริษัท', 8), S('ประเภทงบ', 9), S('รหัสโครงการ'), S('รหัส Item', 16), S('ชื่อรายการ', 32), { h: 'ระดับ', w: 7, num: true }, S('ประเภทสินทรัพย์', 16),
       S('หมวด DOA', 9), S('GL Code', 10), S('GL Name', 20), { h: 'จำนวน', w: 9, num: true }, S('หน่วย', 8), N('ก่อน VAT'), N('VAT'), N('งบ (รวม VAT)'), N('ตัดงบแล้ว'), N('จองไว้'), N('คงเหลือ'), S('หมายเหตุ', 20)], itemRows);
 
     add('requests', [S('เลขที่คำขอ', 15), S('เลขที่เอกสาร', 16), S('เลขที่ Memo', 16), S('บริษัท', 8), S('ประเภทงบ', 9), S('รหัสโครงการ'), S('ประเภทการใช้งบ', 22), S('สถานะ', 20),
@@ -4127,7 +4108,7 @@
       (capexItems.length ? 'ของรายการ ' + scopeNames + ' ' : 'รวมทั้งสิ้น ') + amt(approved) +
       (r.memoBackground ? '\n\n' + r.memoBackground : '') +
       (items.length ? '\n\nโดยมีกรอบวงเงินแยกตามรายการ ดังนี้:\n' + items.map((it, i) => '1.' + (i + 1) + ' ' + it.code + ' ' + it.name + ' จำนวน ' +
-        money(itemTotal(it)) + ' บาท' + (itemInvestor(b, it) !== b.company ? ' (ลงทุนโดย ' + itemInvestor(b, it) + ')' : '')).join('\n') : '');
+        money(itemTotal(it)) + ' บาท').join('\n') : '');
     const consider = (r.purpose ? 'เพื่อ' + r.purpose + ' ' : '') + cname(b.company) + ' จึงมีความประสงค์ขอเบิกใช้งบ ครั้งที่ ' + seq + ' (' + (t.label || '') + ')' +
       (r.payee ? ' ผู้รับเงิน / Supplier: ' + r.payee : '') + ' ในหมวด';
     const defaults = {
@@ -4944,7 +4925,7 @@
     const opts = ledgerItems(b).map((i) => opt(i.id, i.code + ' ' + i.name + ' — งบ ' + money(itemTotal(i)), l.itemId || '')).join('');
     const isNew = l.itemId === 'new';
     return '<tr><td><div class="select-wrap"><select name="chItem" aria-label="รายการ">' + opts + opt('new', '+ เพิ่มรายการใหม่', l.itemId || '') + '</select></div>' +
-      '<div class="new-item"' + (isNew ? '' : ' hidden') + '>' + investorSelect('chInv', l.investor || b.company) + '<input name="chCode" placeholder="รหัสรายการ" value="' + esc(l.code || '') + '"><input name="chName" placeholder="ชื่อรายการ" value="' + esc(l.name || '') + '"></div></td>' +
+      '<div class="new-item"' + (isNew ? '' : ' hidden') + '><input name="chCode" placeholder="รหัสรายการ" value="' + esc(l.code || '') + '"><input name="chName" placeholder="ชื่อรายการ" value="' + esc(l.name || '') + '"></div></td>' +
       '<td><input name="chAmount" type="number" min="0.01" step="0.01" class="right" value="' + esc(l.amount || '') + '" aria-label="ขอเพิ่ม"></td>' +
       '<td><button type="button" class="btn small bad" data-remove-ch title="ลบ">×</button></td></tr>';
   }
@@ -5006,7 +4987,7 @@
         lines = Array.from(rows.rows).map((tr) => {
           const itemId = tr.querySelector('[name="chItem"]').value;
           const l = { itemId, amount: round2(tr.querySelector('[name="chAmount"]').value) };
-          if (itemId === 'new') Object.assign(l, { code: tr.querySelector('[name="chCode"]').value.trim(), name: tr.querySelector('[name="chName"]').value.trim(), investor: tr.querySelector('[name="chInv"]').value });
+          if (itemId === 'new') Object.assign(l, { code: tr.querySelector('[name="chCode"]').value.trim(), name: tr.querySelector('[name="chName"]').value.trim() });
           return l;
         });
         lines.filter((l) => l.itemId === 'new').forEach((l) => {
@@ -5144,7 +5125,7 @@
         } else {
           c.lines.forEach((l) => {
             if (l.itemId === 'new') {
-              const it = { id: nextId('i'), code: l.code, name: l.name, amount: l.amount, vat: 0, qty: '', unit: '', glCode: '', glName: '', investor: l.investor || b.company };
+              const it = { id: nextId('i'), code: l.code, name: l.name, amount: l.amount, vat: 0, qty: '', unit: '', glCode: '', glName: '' };
               if (b.type === 'CAPEX') Object.assign(it, { assetType: assetTypeList()[0], doa: '2.5' });
               b.items.push(it);
               l.itemId = it.id;
@@ -5502,14 +5483,14 @@
       ['ใช้งบ', 'คืนส่วนต่างเมื่อไร', 'เมื่อปิดยอด (Advance/สำรองจ่ายปิดอัตโนมัติเมื่อบันทึกใบเสร็จ)'],
       ['ใช้งบ', 'ผู้ขอยกเลิกใบ CAPEX ที่ออกแล้วได้ไหม', 'ไม่ได้ (ยกเลิกได้เฉพาะตอนรอตรวจ/ถูกส่งกลับ)'],
       ['ใช้งบ', 'จ่ายหลายงวด', 'ใช้ได้กับ PR/PO และจ่ายตรง — บันทึกจ่ายหลายครั้งแล้วปิดยอด'],
-      ['ใช้งบ', 'เงื่อนไขการทำ Memo', 'ทำ Memo เฉพาะงบ CAPEX ที่ใช้เงินข้ามบริษัทกับ PCC: งบของ PCC ที่มีบรรทัดซึ่งบริษัทอื่นเป็นบริษัทที่ลงทุน หรืองบของบริษัทอื่นที่มีบรรทัดซึ่ง PCC เป็นบริษัทที่ลงทุน · นอกนั้นไม่ต้องทำ Memo (ส่งตรงให้ผู้คุมงบ) · OPEX ไม่ใช้ Memo · ปุ่มในฟอร์มเปลี่ยนตามบริษัทที่ลงทุนของแต่ละบรรทัด'],
+      ['ใช้งบ', 'เงื่อนไขการทำ Memo', 'ทำ Memo เฉพาะงบ CAPEX ที่ใช้เงินข้ามบริษัทกับ PCC (เกิดได้เฉพาะงบรวมทั้งโครงการที่ไม่มี Item เพราะ Item ไม่มีช่องบริษัทที่ลงทุนแล้ว): งบของ PCC ที่มีบรรทัดซึ่งบริษัทอื่นเป็นบริษัทที่ลงทุน หรืองบของบริษัทอื่นที่มีบรรทัดซึ่ง PCC เป็นบริษัทที่ลงทุน · นอกนั้นไม่ต้องทำ Memo (ส่งตรงให้ผู้คุมงบ) · OPEX ไม่ใช้ Memo · ปุ่มในฟอร์มเปลี่ยนตามบริษัทที่ลงทุนของแต่ละบรรทัด'],
       ['ใช้งบ', 'ตั้งเกณฑ์ Memo รายบริษัท', 'ข้อมูลหลัก > บริษัท > เกณฑ์ Memo: "ใช้เงินข้ามบริษัทกับบริษัทนี้" (ตั้งต้นเฉพาะ PCC) หรือ "ไม่ต้องใช้" · ต้องแนบไฟล์ Memo ที่เซ็นแล้วก่อนส่ง · ทุกประเภทการใช้งบและทุกยอดเงิน · ผู้บริหารเซ็นนอกระบบ'],
       ['ใช้งบ', 'แบบฟอร์ม Memo', 'ออกตามแบบฟอร์ม Memo จริงของบริษัท: เรียน/สำเนาถึง/เรื่อง/อ้างอิง → 1. เรื่องสืบเนื่อง → 2. เรื่องเพื่อพิจารณาลงนาม (ยอดเงินเป็นตัวอักษร) → ตารางสรุปงบ (กรอบงบ − เบิกไปแล้ว − ขอครั้งนี้ = คงเหลือ) → อ้างอิงอำนาจอนุมัติ → ตารางทบทวน/ผู้พิจารณาอนุมัติ · หัวกระดาษ: โลโก้ของบริษัท (ตั้งต้นใช้โลโก้กลุ่มบริษัท · อัปโหลดโลโก้เฉพาะบริษัทได้ที่ ข้อมูลหลัก > บริษัท) และคำว่า Memo ชิดขวา · ตารางหัว (เรียน/วันที่-เลขที่, เรื่อง, สำเนาถึง, อ้างอิง) กว้างกว่าเนื้อความ มีแต่เส้นแนวนอน · ยังไม่ทำเลขหน้าและแถบสีท้ายกระดาษ'],
       ['ใช้งบ', 'กรอก Memo อย่างไร', 'กด "ทำ Memo" ในฟอร์มคำขอ → ระบบออกเลขที่ Memo แล้วเปิดหน้า Memo ที่เป็นโครงแบบฟอร์มจริง มีช่องกรอกในตำแหน่งเดียวกับเอกสาร: เรียน · วันที่ · สำเนาถึง · เรื่อง · อ้างอิง · 1. เรื่องสืบเนื่อง · 2. เรื่องเพื่อพิจารณาลงนาม · อ้างอิงอำนาจอนุมัติ · ผู้ลงนามเสนอ (ชื่อ/ตำแหน่ง) · ผู้ทบทวน · ผู้พิจารณาอนุมัติ (เพิ่ม/ลบแถวได้) · ค่าเริ่มต้นดึงจากคำขอและ ข้อมูลหลัก > ผู้ลงนาม Memo ของบริษัทที่ลงทุน · ยอดเงิน รายการ และตารางสรุปงบ ระบบคำนวณจากคำขอ (แก้ที่คำขอ) · แก้ Memo ได้จนกว่าจะแนบฉบับที่เซ็นแล้วและส่งให้ผู้คุมงบ'],
       ['ใช้งบ', 'ค่าเริ่มต้นของเรื่องสืบเนื่อง / อ้างอิง', 'เรื่องสืบเนื่อง = ข้อความอ้างอิงงบและกรอบวงเงิน (ผู้ขอแก้/เพิ่มย่อหน้าเองได้) · อ้างอิง = มติที่ประชุม (CAPEX) / เอกสารอนุมัติผู้บริหาร (OPEX) ของงบ · "ครั้งที่" นับจากคำขอก่อนหน้าของงบเดียวกัน'],
       ['ใช้งบ', 'ใครเลือกว่าทำ Memo', 'ผู้ขอเลือกเองด้วยปุ่ม "ทำ Memo" ข้างปุ่มส่ง · ถ้าเกณฑ์ของบริษัทบังคับ (ตั้งต้น: งบที่ไม่มี Item) จะมีแค่ปุ่มทำ Memo'],
       ['ใช้งบ', 'ขั้นตอน Memo', 'บันทึกคำขอ → ระบบออกเลขที่ Memo (MEMO-บริษัทปี-ลำดับ) และจองงบไว้ → ผู้ขอพิมพ์ไปให้ผู้บริหารเซ็น → แนบไฟล์ที่เซ็นแล้ว + ชื่อผู้บริหาร → ส่งให้ผู้คุมงบ · แก้ไขคำขอระหว่างรอได้ (ต้องเซ็นใหม่ ใช้เลขที่เดิม)'],
-      ['ใช้งบ', 'บริษัทที่ลงทุน', 'งบที่มี Item: กำหนดที่ Item ตอนตั้งงบ (ค่าตั้งต้น = บริษัทเจ้าของงบ) ตอนขอใช้ไม่ต้องเลือก · งบที่ไม่มี Item: เลือกรายบรรทัดตอนขอเบิกใช้งบ (ค่าตั้งต้น = บริษัทเจ้าของงบ) · แสดงในใบเบิกใช้งบและ Memo'],
+      ['ใช้งบ', 'บริษัทที่ลงทุน', 'ไม่มีการใช้งบข้ามบริษัทราย Item แล้ว — ทุก Item ใช้งบของบริษัทเจ้าของงบ (ไม่มีช่อง "บริษัทที่ลงทุน" ใน Item) · งบที่ไม่มี Item (งบรวมทั้งโครงการ) ยังเลือกบริษัทที่ลงทุนรายบรรทัดตอนเบิกใช้งบได้ (ค่าตั้งต้น = บริษัทเจ้าของงบ) · แสดงในใบเบิกใช้งบและ Memo'],
       ['ใช้งบ', 'หมวดค่าใช้จ่าย', 'ใช้กับงบรวมโครงการ · แก้รายการหมวดได้ที่ข้อมูลหลัก'],
       ['OPEX', 'Item ของงบ OPEX', 'ต้องมี Item เสมอ (ไม่มีงบรวมทั้งโครงการ) · Item หลัก (1, 2, 3) กำหนดตอนตั้งงบพร้อมวงเงิน ไม่มีจำนวน/หน่วย · Item ย่อยได้ 3 ระดับ (1 → 1.1 → 1.1.1) เพิ่มได้เรื่อย ๆ หลังงบเปิดใช้แล้ว · รหัสโครงการและรหัส Item ผู้สร้างงบตั้งเอง โดย Business เจ้าของงบหรือผู้คุมงบ (ไม่ต้องอนุมัติซ้ำ ยอดงบรวมไม่เปลี่ยน)'],
       ['OPEX', 'วงเงินของ Item ย่อย', 'เงื่อนไขเดียว: รวมกันต้องไม่เกินวงเงิน Item หลัก (ถ้า 1.1 กำหนดวงเงินไว้ 1.1.x ต้องรวมไม่เกิน 1.1 ด้วย เพื่อให้ยอดคงเหลือสอดคล้องกัน) · จะกำหนดหรือไม่กำหนดวงเงินของ Item ย่อยก็ได้ (ไม่กำหนด = ใช้วงเงินของ Item แม่) · จำนวน/หน่วย กรอกที่ Item ย่อย · Item ย่อยที่กำหนดวงเงินถูกตรวจทั้งวงเงินตัวเองและวงเงิน Item หลัก · Item ย่อยที่มีการขอใช้แล้ว แก้รหัส/ลบไม่ได้'],
