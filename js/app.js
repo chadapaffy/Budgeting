@@ -121,6 +121,8 @@
   ];
   /** โหมดทดลองเก็บไฟล์แนบในเบราว์เซอร์ จึงจำกัดขนาดไว้เล็ก (ระบบจริงเก็บใน Storage ได้ใหญ่กว่า) */
   const ATTACH_MAX = 400 * 1024;
+  /** กลุ่ม Priority ตั้งต้น (ตามไฟล์ Capex / Opex Governance Framework) — เพิ่ม / แก้ได้ที่ข้อมูลหลัก */
+  const DEFAULT_PRIORITY_GROUPS = ['ลดรายจ่าย (Cost Efficiency)', 'เพิ่มรายได้ (Revenue Growth)', 'สร้างโอกาสอนาคต (Strategic/Future Growth)', 'จำเป็นต้องมี/ตามกฎหมาย (Mandatory/Compliance/BAU)'];
   const CBS_STATUS = ['Plan', 'On Progress', 'แล้วเสร็จ'];
   const ASSET_TYPES = ['เครื่องจักร', 'เครื่องมือและอุปกรณ์', 'อาคารและสิ่งปลูกสร้าง', 'ยานพาหนะ', 'อุปกรณ์สำนักงาน', 'ซอฟต์แวร์', 'อื่นๆ'];
 
@@ -144,9 +146,16 @@
     ASSET_TYPES.forEach((t) => addBy(assetTypes, 'name', { name: t }));
     const glCodes = list('glCodes').slice();
     const expenseCategories = list('expenseCategories').length ? list('expenseCategories').slice() : DEFAULT_CATEGORIES.map((c) => Object.assign({}, c));
+    const priorityGroups = list('priorityGroups').slice();
+    if (!priorityGroups.length) DEFAULT_PRIORITY_GROUPS.forEach((n) => priorityGroups.push({ name: n }));
+    const investGroups = list('investGroups').slice();
+    const listGroups = list('listGroups').slice();
     (d.budgets || []).forEach((b) => {
       addBy(companies, 'code', { code: b.company, name: '' });
       addBy(departments, 'name', { name: b.department });
+      addBy(priorityGroups, 'name', { name: b.priorityGroup });
+      addBy(investGroups, 'name', { name: b.investGroup });
+      addBy(listGroups, 'name', { name: b.listGroup });
       addBy(groups, 'code', { code: b.group, name: DEFAULT_GROUP_NAMES[b.group] || '' });
       (b.items || []).forEach((it) => {
         if (b.type === 'CAPEX') addBy(assetTypes, 'name', { name: it.assetType });
@@ -161,7 +170,7 @@
     companies.forEach((c) => {
       if (!memoParties.some((x) => x.code === c.code)) memoParties.push(Object.assign({ code: c.code, to: '', cc: '', reviewer: '', signer: '' }, MEMO_PARTY_SAMPLE[c.code] || {}));
     });
-    d.master = { companies, departments, groups, assetTypes, glCodes, expenseCategories, memoParties, memoRule: 2 };
+    d.master = { companies, departments, groups, assetTypes, glCodes, expenseCategories, memoParties, priorityGroups, investGroups, listGroups, memoRule: 2 };
     return d;
   }
   const companyMap = () => Object.fromEntries(db.master.companies.map((c) => [c.code, c.name]));
@@ -650,6 +659,9 @@
 
   const user = (id) => USERS.find((u) => u.id === id);
   const userName = (id) => (user(id) ? user(id).name : '-');
+  /** เจ้าของงบ: ผู้ใช้ในระบบ หรือชื่อจากไฟล์ที่ Import (ยังไม่ผูกกับผู้ใช้ — ผู้คุมงบกำหนดทีหลังได้) */
+  const ownerText = (b) => (b.ownerId ? userName(b.ownerId) : (b.ownerName || ''));
+  const ownerLabel = (b) => (b.ownerId ? userName(b.ownerId) : (b.ownerName ? b.ownerName + ' (ยังไม่ผูกกับผู้ใช้)' : '-'));
   const me = () => (REMOTE ? remoteMe : (user(currentUserId) || USERS[0]));
   const permsOf = (u) => (u && (u.perms || DEMO_ROLE_PERMS[u.role])) || [];
   const can = (perm) => permsOf(me()).includes(perm);
@@ -1016,7 +1028,7 @@
 
   function budgetSubline(b, mine) {
     const parts = [b.company, b.department, 'ปีงบ ' + b.fiscalYear];
-    if (!mine) parts.push(userName(b.ownerId));
+    if (!mine) parts.push(ownerLabel(b));
     return parts.filter(Boolean).map(esc).join(' · ');
   }
 
@@ -1060,7 +1072,7 @@
     const cols = BUDGET_COLS.map((c) => (mine && c[0] === 'dept' ? ['dept', 'หน่วยงาน'] : c));
     const rows = all.map((b) => {
       const us = usage(b);
-      const search = [b.name, b.code, b.parentCode, b.department, b.company, userName(b.ownerId)]
+      const search = [b.name, b.code, b.parentCode, b.department, b.company, ownerLabel(b)]
         .concat(b.items.map((i) => i.code + ' ' + i.name)).join(' ').toLowerCase();
       const sub = b.structure === 'project' ? 'งบรวมโครงการ' : b.type === 'CAPEX' ? b.items.length + ' รายการย่อย' : ledgerItems(b).length + ' Item หลัก';
       const state = b.state || 'active';
@@ -1078,13 +1090,13 @@
       ].join('');
       return '<tr' + (active ? '' : ' class="not-active"') + ' data-search="' + esc(search) + '" data-dept="' + esc(b.department) + '" data-year="' + esc(b.fiscalYear) + '" data-state="' + state +
         '" data-company="' + esc(b.company) + '" data-type="' + esc(b.type) +
-        '" data-code="' + esc(b.code) + '" data-name="' + esc(b.name) + '" data-dept-sort="' + esc(b.department) + '" data-owner="' + esc(userName(b.ownerId)) +
+        '" data-code="' + esc(b.code) + '" data-name="' + esc(b.name) + '" data-dept-sort="' + esc(b.department) + '" data-owner="' + esc(ownerText(b)) +
         '" data-statelabel="' + esc(BUDGET_STATE[state]) + '" data-total="' + total + '" data-used="' + (active ? us.used : 0) + '" data-reserved="' + (active ? us.reserved : 0) +
         '" data-remaining="' + (active ? us.remaining : 0) + '" data-pct="' + pct + '">' +
         '<td class="nowrap"><a class="mono" href="#/budget/' + b.id + '">' + esc(b.code) + '</a><div>' + badge(b.type, TYPE_SHORT[b.type]) + '</div></td>' +
         '<td class="b-name"><a href="#/budget/' + b.id + '">' + esc(b.name) + '</a><div class="muted">' + esc(sub) + '</div></td>' +
         '<td class="nowrap">' + esc(b.company) + ' · ' + esc(b.fiscalYear) + '</td>' +
-        '<td>' + esc(b.department) + (mine ? '' : '<div class="muted">' + esc(userName(b.ownerId)) + '</div>') + '</td>' +
+        '<td>' + esc(b.department) + (mine ? '' : '<div class="muted">' + esc(ownerLabel(b)) + '</div>') + '</td>' +
         '<td>' + badge(BUDGET_STATE_BADGE[state], BUDGET_STATE[state]) + '</td>' +
         '<td class="num">' + money(total) + (active ? '' : '<div class="muted">' + (b.setup ? 'วงเงินงบ' : 'ที่ขออนุมัติ') + '</div>') + '</td>' +
         (active
@@ -1275,7 +1287,7 @@
     const copySrc = copyList.find((x) => x.id === copyId) || null;
     const v = b || (copySrc ? {
       type: 'CBS', structure: 'items', company: copySrc.company, fiscalYear: copySrc.fiscalYear, group: copySrc.group || '', code: '', parentCode: '', name: copySrc.name,
-      department: copySrc.department || '', ownerId: u.id, note: copySrc.note || '', status: 'Plan', startDate: '', endDate: '', production: {},
+      department: copySrc.department || '', ownerId: u.id, note: copySrc.note || '', listGroup: copySrc.listGroup || '', priorityGroup: copySrc.priorityGroup || '', priorityReason: copySrc.priorityReason || '', financeOwner: copySrc.financeOwner || '', status: 'Plan', startDate: '', endDate: '', production: {},
       // คัดลอกเฉพาะ Item หลัก (รหัส ชื่อ วงเงิน VAT GL) — Item ย่อยและข้อมูลการอนุมัติไม่ติดไป
       items: copySrc.items.filter((it) => depth(it) === 0).map((it) => ({ code: it.code, name: it.name, qty: '', unit: '', amount: it.amount, vat: it.vat || 0, glCode: it.glCode || '', glName: it.glName || '' }))
     } : {
@@ -1294,7 +1306,7 @@
       '<span><strong>' + title + '</strong><small>' + sub + '</small></span></label>';
     const title = mode === 'setup' ? (b ? 'แก้ไขงบ ' + esc(b.code) : 'ลงงบประจำปี') : b ? 'แก้ไขร่างคำขออนุมัติงบ ' + esc(b.code) : 'ขออนุมัติงบใหม่';
     const introFor = (type) => mode === 'setup'
-      ? 'ผู้คุมงบลงงบลงทุน (CAPEX) ประจำปีให้ Business — เมื่อบันทึก งบจะรอ Business เจ้าของงบ ขอดำเนินการใช้งบครั้งแรก โดยทำ Memo ให้ผู้บริหารเซ็น แนบแล้วส่งให้ผู้คุมงบยืนยัน · ลงหลายงบพร้อมกันได้ที่ Import Excel · งบ OPEX ให้ Business เป็นผู้สร้างและส่งอนุมัติเอง'
+      ? 'ผู้คุมงบลงงบลงทุน (CAPEX) ประจำปีให้ Business — เมื่อบันทึก งบจะรอ Business เจ้าของงบ ขอดำเนินการใช้งบครั้งแรก โดยทำ Memo ให้ผู้บริหารเซ็น แนบแล้วส่งให้ผู้คุมงบยืนยัน · ลงหลายงบพร้อมกันได้ที่ Import Excel (ไฟล์ Capex / Opex Governance Framework) · งบ OPEX ปกติ Business เป็นผู้สร้างและส่งอนุมัติเอง'
       : (type === 'CBS'
         ? 'บันทึกเป็นร่างก่อน → พิมพ์แบบฟอร์มของระบบ หรือใช้เอกสารขออนุมัติของตนเอง ส่งผู้บริหารอนุมัติเอง (OPEX ไม่ต้องเข้าบอร์ด) → เมื่อผู้บริหารอนุมัติ นำเอกสารอนุมัติกลับมาแนบในระบบ แล้วกด "ขอดำเนินการใช้งบ" งบเปิดใช้ทันที (ถ้าผู้บริหารอนุมัติไม่เต็มจำนวน ให้แก้ตัวเลขในร่างก่อน)'
         : 'บันทึกเป็นร่างก่อน → พิมพ์แบบฟอร์มเข้าที่ประชุม → เมื่อที่ประชุมอนุมัติ แนบมติแล้วส่งให้ผู้คุมงบยืนยันเปิดใช้ (ถ้าที่ประชุมอนุมัติไม่เต็มจำนวน ให้แก้ตัวเลขในร่างก่อนส่ง)');
@@ -1328,9 +1340,16 @@
       '<div class="row">' +
       field('หน่วยงาน', select('department', '<option value="">— เลือก —</option>' + optList(db.master.departments, 'name', (d) => d.name, v.department), ' required')) +
       (mode === 'setup'
-        ? field('Business เจ้าของงบ', select('ownerId', '<option value="">— เลือก —</option>' + requesters.map((x) => opt(x.id, x.name + (x.title ? ' — ' + x.title : ''), v.ownerId)).join(''), ' required'))
+        ? field('Business เจ้าของงบ' + (!v.ownerId && v.ownerName ? ' <small class="muted">(ชื่อในไฟล์: ' + esc(v.ownerName) + ')</small>' : ''), select('ownerId', '<option value="">— เลือก —</option>' + requesters.map((x) => opt(x.id, x.name + (x.title ? ' — ' + x.title : ''), v.ownerId)).join(''), ' required'))
         : '<input type="hidden" name="ownerId" value="' + esc(v.ownerId) + '"><div class="field"><span>Business เจ้าของงบ</span><div class="out left">' + esc(userName(v.ownerId)) + '</div></div>') +
       '</div>' +
+      '<fieldset class="prio-set"><legend>การจัดลำดับความสำคัญ (ตามไฟล์ Capex / Opex Governance Framework)</legend><div class="row">' +
+      field('กลุ่มรายการ', select('listGroup', '<option value="">— เลือก —</option>' + optList(db.master.listGroups, 'name', (x) => x.name, v.listGroup || ''))) +
+      field('กลุ่ม Priority', select('priorityGroup', '<option value="">— เลือก —</option>' + optList(db.master.priorityGroups, 'name', (x) => x.name, v.priorityGroup || ''))) +
+      field('กลุ่ม Priority การลงทุน (กลุ่มการลงทุน New)', select('investGroup', '<option value="">— เลือก —</option>' + optList(db.master.investGroups, 'name', (x) => x.name, v.investGroup || '')), ' data-for="CAPEX"') +
+      field('เจ้าของฝ่ายการเงิน (ติดตามร่วม)', '<input name="financeOwner" list="finOwnerList" value="' + esc(v.financeOwner || '') + '" autocomplete="off">' +
+        '<datalist id="finOwnerList">' + uniq(USERS.filter((x) => permsOf(x).includes('budget.manage')).map((x) => x.name).concat(db.budgets.map((x) => x.financeOwner).filter(Boolean))).map((n) => '<option value="' + esc(n) + '">').join('') + '</datalist>') +
+      '</div>' + field('เหตุผลสนับสนุน Priority (ย่อ)', '<textarea name="priorityReason" rows="2">' + esc(v.priorityReason || '') + '</textarea>') + '</fieldset>' +
       (mode === 'setup'
         ? '<div class="row">' + field('วันที่อนุมัติงบประจำปี (ถ้ามี)', '<input name="meetingDate" type="date" value="' + esc((v.meeting || {}).date || '') + '">') +
           field('อ้างอิงการอนุมัติงบประจำปี (ถ้ามี)', '<input name="meetingNo" placeholder="เช่น มติที่ประชุม 12/2569" value="' + esc((v.meeting || {}).no || '') + '">') +
@@ -1517,7 +1536,13 @@
         name: f.name.value.trim(),
         department: f.department.value.trim(),
         ownerId: f.ownerId.value || (existing ? existing.ownerId : me().id),
-        note: f.note.value.trim()
+        ownerName: f.ownerId.value ? '' : (existing ? existing.ownerName || '' : ''),
+        note: f.note.value.trim(),
+        listGroup: f.listGroup.value,
+        priorityGroup: f.priorityGroup.value,
+        investGroup: type === 'CAPEX' ? f.investGroup.value : '',
+        priorityReason: f.priorityReason.value.trim(),
+        financeOwner: f.financeOwner.value.trim()
       };
       data.group = f.group.value.trim();
       const at = new Date().toISOString();
@@ -1690,7 +1715,7 @@
         returned: 'ผู้คุมงบส่งกลับให้แก้ไข: ' + (b.returnReason || ''),
         review: (isCapex ? 'แนบมติแล้ว' : 'แนบเอกสารอนุมัติผู้บริหารแล้ว') + ' รอผู้คุมงบตรวจสอบและยืนยันเปิดใช้งบ',
         pending_open: own ? (isCapex ? 'ผู้คุมงบลงงบนี้ให้คุณแล้ว — ขอดำเนินการใช้งบครั้งแรกโดยทำ Memo ให้ผู้บริหารเซ็น แนบไฟล์ที่เซ็นแล้ว และส่งให้ผู้คุมงบยืนยัน (ด้านล่าง)'
-          : 'ผู้คุมงบลงงบนี้ให้คุณแล้ว — กด "ขอดำเนินการใช้งบ" ด้านล่างเพื่อเริ่มใช้งบ (OPEX ไม่ต้องทำ Memo)') : 'รอ ' + userName(b.ownerId) + ' ขอดำเนินการใช้งบ' + (isCapex ? ' (ทำ Memo ให้ผู้บริหารเซ็น)' : ''),
+          : 'ผู้คุมงบลงงบนี้ให้คุณแล้ว — กด "ขอดำเนินการใช้งบ" ด้านล่างเพื่อเริ่มใช้งบ (OPEX ไม่ต้องทำ Memo)') : 'รอ ' + ownerLabel(b) + ' ขอดำเนินการใช้งบ' + (isCapex ? ' (ทำ Memo ให้ผู้บริหารเซ็น)' : ''),
         open_review: 'แนบ Memo ที่ผู้บริหารเซ็นแล้ว รอผู้คุมงบตรวจ Memo และยืนยันขอดำเนินการใช้งบ',
         open_returned: 'ผู้คุมงบส่ง Memo ขอดำเนินการใช้งบกลับให้แก้ไข: ' + (b.returnReason || ''),
         cancelled: b.setup ? 'งบนี้ถูกยกเลิกแล้ว' : 'คำขออนุมัติงบนี้ถูกยกเลิกแล้ว'
@@ -1705,8 +1730,13 @@
       fact('บริษัท', esc(b.company) + '<small>' + esc(companyMap()[b.company] || '') + '</small>') +
       fact('ปีงบประมาณ', esc(b.fiscalYear)) +
       fact('กลุ่มงบประมาณ', esc(b.group)) +
+      fact('กลุ่มรายการ', esc(b.listGroup)) +
+      fact('กลุ่ม Priority', esc(b.priorityGroup)) +
+      fact('กลุ่ม Priority การลงทุน', esc(b.investGroup)) +
+      fact('เจ้าของฝ่ายการเงิน (ติดตามร่วม)', esc(b.financeOwner)) +
+      fact('เหตุผลสนับสนุน Priority', esc(b.priorityReason), true) +
       fact('หน่วยงาน', esc(b.department)) +
-      fact('Business เจ้าของงบ', esc(userName(b.ownerId))) +
+      fact('Business เจ้าของงบ', esc(ownerLabel(b))) +
       fact('โครงสร้างงบ', isProject ? 'งบรวมทั้งโครงการ' : (isCapex ? b.items.length + ' รายการย่อย' : ledgerItems(b).length + ' Item หลัก')) +
       fact(apprOf(b.type).short, b.meeting && b.meeting.no ? esc(b.meeting.no) + (b.meeting.date || b.meeting.by ? '<small>' + (b.meeting.date ? fmtDay(b.meeting.date) : '') + (b.meeting.by ? ' · ' + esc(b.meeting.by) : '') + '</small>' : '') : '') +
       fact('หมายเหตุ', esc(b.note), true) +
@@ -2004,7 +2034,7 @@
       else if (canOpenBudget(b)) {
         h += '<p class="muted small-note">ตรวจรายการและวงเงินด้านล่าง ถ้าถูกต้องกด "ขอดำเนินการใช้งบ" เพื่อเริ่มขอเบิกใช้งบ (OPEX ไม่ต้องทำ Memo) · ถ้าวงเงิน / Item ไม่ถูกต้อง แจ้งผู้คุมงบให้แก้ก่อน</p>' +
           '<div class="actions"><button type="button" class="btn primary" id="openBudget" data-id="' + b.id + '">ขอดำเนินการใช้งบ</button></div>';
-      } else h += '<p class="muted">รอ ' + esc(userName(b.ownerId)) + ' กดขอดำเนินการใช้งบ</p>';
+      } else h += '<p class="muted">รอ ' + esc(ownerLabel(b)) + ' กดขอดำเนินการใช้งบ</p>';
       return h + '</section>';
     }
     // CAPEX: Memo ขอดำเนินการใช้งบ
@@ -2025,7 +2055,7 @@
         attachList(m.files, { empty: 'ยังไม่ได้แนบ Memo ที่เซ็นแล้ว' }) +
         (b.state === 'active' ? '<p class="muted small-note">เปิดใช้งบแล้วโดย ' + esc(userName(b.activatedBy)) + ' · ' + fmtDate(b.activatedAt) + '</p>' : '');
     } else {
-      h += '<p class="muted">รอ ' + esc(userName(b.ownerId)) + ' ทำ Memo ขอดำเนินการใช้งบ ให้ผู้บริหารเซ็น แล้วส่งให้ผู้คุมงบตรวจ</p>';
+      h += '<p class="muted">รอ ' + esc(ownerLabel(b)) + ' ทำ Memo ขอดำเนินการใช้งบ ให้ผู้บริหารเซ็น แล้วส่งให้ผู้คุมงบตรวจ</p>';
     }
     return h + '</section>';
   }
@@ -2095,7 +2125,7 @@
       background: 'ตามที่' + cname(b.company) + ' ได้รับการจัดสรรงบประมาณลงทุน (CAPEX) ประจำปี ' + b.fiscalYear + ' โครงการ ' + b.code + ' ' + b.name +
         ' ' + (b.department ? 'ของ' + b.department + ' ' : '') + 'กรอบวงเงินรวมทั้งสิ้น ' + amt(total) + (b.note ? '\n\n' + b.note : ''),
       consider: 'เพื่อให้สามารถดำเนินโครงการตามแผนได้ จึงขออนุมัติดำเนินการใช้งบประมาณโครงการ ' + b.code + ' ทั้งโครงการ ตามรายการดังนี้',
-      signerName: userName(b.ownerId),
+      signerName: ownerText(b),
       signerTitle: mp.proposer || '',
       reviewers: mp.reviewers.slice(),
       approvers: mp.approvers.slice()
@@ -2223,38 +2253,48 @@
     return { names: Object.keys(out), text };
   }
 
-  /** แผ่นงานแรกของ .xlsx → แถว (array ของ array ข้อความ/ตัวเลข) */
-  async function readXlsxRows(buf) {
+  /** ทุกแผ่นงานของ .xlsx → [{ name, rows }] (rows = array ของ array ข้อความ/ตัวเลข · แถวว่างคงตำแหน่งไว้ให้เลขแถวตรงกับ Excel) */
+  async function readXlsxSheets(buf) {
     const zip = await readZip(buf);
     const xml = (t) => new DOMParser().parseFromString(t, 'application/xml');
     const tags = (node, name) => Array.from(node.getElementsByTagName(name));
     const wb = xml(await zip.text('xl/workbook.xml') || '');
-    const first = tags(wb, 'sheet')[0];
-    if (!first) throw new Error('ไม่พบแผ่นงานในไฟล์');
-    const rid = first.getAttribute('r:id') || first.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+    const list = tags(wb, 'sheet');
+    if (!list.length) throw new Error('ไม่พบแผ่นงานในไฟล์');
     const rels = xml(await zip.text('xl/_rels/workbook.xml.rels') || '<x/>');
-    const rel = tags(rels, 'Relationship').find((r) => r.getAttribute('Id') === rid);
-    let target = rel ? rel.getAttribute('Target') : 'worksheets/sheet1.xml';
-    target = target.startsWith('/') ? target.slice(1) : 'xl/' + target.replace(/^\.\//, '');
     const ssText = await zip.text('xl/sharedStrings.xml');
     const shared = ssText ? tags(xml(ssText), 'si').map((si) => tags(si, 't').filter((t) => !t.closest('rPh')).map((t) => t.textContent).join('')) : [];
-    const sheet = xml(await zip.text(target) || '');
     const colIdx = (ref) => { let n = 0; for (const ch of String(ref).replace(/\d+/g, '')) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
-    return tags(sheet, 'row').map((row) => {
-      const out = [];
-      tags(row, 'c').forEach((c, i) => {
-        const t = c.getAttribute('t');
-        const v = (tags(c, 'v')[0] || {}).textContent;
-        let val = '';
-        if (t === 's') val = shared[Number(v)] || '';
-        else if (t === 'inlineStr') val = tags(c, 't').map((x) => x.textContent).join('');
-        else if (t === 'str' || t === 'b' || t === 'e') val = v || '';
-        else if (v !== undefined && v !== '') val = Number(v);
-        out[c.getAttribute('r') ? colIdx(c.getAttribute('r')) : i] = val;
+    const out = [];
+    for (let k = 0; k < list.length; k++) {
+      const sh = list[k];
+      const rid = sh.getAttribute('r:id') || sh.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+      const rel = tags(rels, 'Relationship').find((r) => r.getAttribute('Id') === rid);
+      let target = rel ? rel.getAttribute('Target') : 'worksheets/sheet' + (k + 1) + '.xml';
+      target = target.startsWith('/') ? target.slice(1) : 'xl/' + target.replace(/^\.\//, '');
+      const sheet = xml(await zip.text(target) || '<x/>');
+      const rows = [];
+      tags(sheet, 'row').forEach((row, ri) => {
+        const cells = [];
+        tags(row, 'c').forEach((c, i) => {
+          const t = c.getAttribute('t');
+          const v = (tags(c, 'v')[0] || {}).textContent;
+          let val = '';
+          if (t === 's') val = shared[Number(v)] || '';
+          else if (t === 'inlineStr') val = tags(c, 't').map((x) => x.textContent).join('');
+          else if (t === 'str' || t === 'b' || t === 'e') val = v || '';
+          else if (v !== undefined && v !== '') val = Number(v);
+          cells[c.getAttribute('r') ? colIdx(c.getAttribute('r')) : i] = val;
+        });
+        const rn = Number(row.getAttribute('r')) || ri + 1;
+        if (rn > 0 && rn < 200000) rows[rn - 1] = Array.from(cells, (x) => (x === undefined ? '' : x));
       });
-      return Array.from(out, (x) => (x === undefined ? '' : x));
-    });
+      out.push({ name: sh.getAttribute('name') || 'Sheet' + (k + 1), rows: Array.from(rows, (x) => x || []) });
+    }
+    return out;
   }
+  /** แผ่นงานแรกของ .xlsx → แถว */
+  async function readXlsxRows(buf) { return (await readXlsxSheets(buf))[0].rows; }
 
   /** CSV (UTF-8) → แถว */
   function parseCsv(text) {
@@ -2370,26 +2410,34 @@
 
   function viewImport() {
     if (!can('budget.manage')) return '<div class="alert error">Import งบได้เฉพาะผู้คุมงบ</div>';
-    let html = '<div class="page-head"><div><h1>Import งบประจำปีจาก Excel</h1><div class="page-sub">ลงงบ CAPEX หลายงบพร้อมกัน — งบที่ Import จะรอ Business เจ้าของงบ ขอดำเนินการใช้งบครั้งแรก (ทำ Memo ให้ผู้บริหารเซ็น แนบแล้วผู้คุมงบยืนยัน) · งบ OPEX ให้ Business เป็นผู้สร้างเอง</div></div></div>' +
+    let html = '<div class="page-head"><div><h1>Import งบประจำปีจาก Excel</h1><div class="page-sub">ลงงบ CAPEX / OPEX หลายงบพร้อมกันจากไฟล์ Governance Framework — งบที่ Import จะรอ Business เจ้าของงบ ขอดำเนินการใช้งบครั้งแรก</div></div></div>' +
       takeFlash() +
-      '<section class="card form-section"><ol class="import-steps"><li>ดาวน์โหลดไฟล์ตัวอย่าง แล้วกรอก 1 แถวต่อ 1 Item (รหัสโครงการเดียวกัน = งบเดียวกัน)</li>' +
+      '<section class="card form-section"><ol class="import-steps"><li>ใช้ไฟล์ Governance Framework ตัวจริงได้เลย หรือดาวน์โหลดไฟล์ตัวอย่างไปกรอก (รูปแบบรายการ Item: 1 แถวต่อ 1 Item, รหัสโครงการเดียวกัน = งบเดียวกัน)</li>' +
       '<li>เลือกไฟล์ .xlsx หรือ .csv ระบบจะแสดงตัวอย่างและตรวจข้อมูลก่อน</li><li>กด "นำเข้า" — งบที่มีข้อผิดพลาดจะไม่ถูกนำเข้า</li></ol>' +
-      '<div class="actions"><button type="button" class="btn" id="importTemplate">ดาวน์โหลดไฟล์ตัวอย่าง (.xlsx)</button>' +
+      '<div class="alert info">รองรับ 2 รูปแบบ: <strong>ไฟล์ Capex / Opex Governance Framework</strong> (แผ่น "… Capex Request" / "… Opex Request" — ระบบรู้เองจากหัวตาราง) และรูปแบบรายการ Item เดิม (1 แถว = 1 Item, CAPEX เท่านั้น)</div>' +
+      '<div class="actions"><button type="button" class="btn" id="importTemplateGov">ไฟล์ตัวอย่างรูปแบบ Governance (.xlsx)</button>' +
+      '<button type="button" class="btn" id="importTemplate">ไฟล์ตัวอย่างรูปแบบรายการ Item (.xlsx)</button>' +
       '<label class="btn primary file-btn">เลือกไฟล์ Excel / CSV<input type="file" id="importFile" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden></label>' +
       '<a class="btn" href="#/budgets">กลับ</a></div></section>';
     const pv = importPreview;
     if (!pv) return html;
     if (pv.error) return html + '<div class="alert error">' + esc(pv.file) + ': ' + esc(pv.error) + '</div>';
     const okList = pv.budgets.filter((x) => !x.errors.length);
+    if (pv.kind === 'gov') {
+      html += '<div class="alert info">อ่านไฟล์รูปแบบ Governance: พบ ' + pv.sheets + ' แผ่นรายการ' + (pv.skipped.length ? ' · <strong>ข้าม ' + pv.skipped.length + ' แถวที่สถานะไม่ใช่ "' + GOV_APPROVED + '"</strong> (' +
+        esc(pv.skipped.slice(0, 8).map((x) => x.code || 'แถว ' + x.line).join(', ')) + (pv.skipped.length > 8 ? ' …' : '') + ')' : '') + '</div>' +
+        pv.notes.map((n) => '<div class="alert info">' + esc(n) + '</div>').join('');
+    }
     html += '<h2>ตรวจข้อมูลจาก ' + esc(pv.file) + ' <span class="muted count-note">(' + pv.budgets.length + ' งบ · พร้อมนำเข้า ' + okList.length + ')</span></h2>' +
       '<div class="table-wrap"><table class="import-table"><thead><tr><th>งบ</th><th>บริษัท / ปี</th><th>Business</th><th class="num">Item</th><th class="num">วงเงิน (รวม VAT)</th><th>ผลตรวจ</th></tr></thead><tbody>' +
       pv.budgets.map((x) => {
         const d = x.data;
         return '<tr class="' + (x.errors.length ? 'row-bad' : '') + '"><td>' + badge(d.type, TYPE_SHORT[d.type]) + ' <strong>' + esc(d.code || '-') + '</strong><div class="muted">' + esc(d.name) + '</div></td>' +
           '<td class="nowrap">' + esc(d.company) + ' · ' + esc(d.fiscalYear) + '<div class="muted">' + esc(d.department) + '</div></td>' +
-          '<td class="nowrap">' + esc(d.ownerId ? userName(d.ownerId) : '-') + '</td><td class="num">' + d.items.length + '</td>' +
+          '<td class="nowrap">' + esc(d.ownerId ? userName(d.ownerId) : d.ownerName || '-') + '</td><td class="num">' + (d.structure === 'project' ? 'งบรวม' : d.items.length) + '</td>' +
           '<td class="num">' + money(budgetTotal(d)) + '</td>' +
-          '<td>' + (x.errors.length ? '<ul class="err-list">' + x.errors.map((e) => '<li>' + esc(e) + '</li>').join('') + '</ul>' : '<span class="badge approved">พร้อมนำเข้า</span>') + '</td></tr>';
+          '<td>' + (x.errors.length ? '<ul class="err-list">' + x.errors.map((e) => '<li>' + esc(e) + '</li>').join('') + '</ul>' : '<span class="badge approved">พร้อมนำเข้า</span>') +
+          (x.warnings || []).map((w) => '<div class="muted">' + esc(w) + '</div>').join('') + '</td></tr>';
       }).join('') + '</tbody></table></div>' +
       '<div class="actions"><button type="button" class="btn primary" id="importGo"' + (okList.length ? '' : ' disabled') + '>นำเข้า ' + okList.length + ' งบ (ยังไม่เปิดใช้งบ)</button>' +
       '<button type="button" class="btn" id="importClear">ล้าง</button>' +
@@ -2400,21 +2448,23 @@
   function bindImport() {
     const tpl = document.getElementById('importTemplate');
     if (!tpl) return;
-    tpl.addEventListener('click', () => {
-      const blob = new Blob([importTemplate()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const download = (bytes, name) => {
+      const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'budget-import-template.xlsx';
+      a.download = name;
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-    });
+    };
+    tpl.addEventListener('click', () => download(importTemplate(), 'budget-import-template.xlsx'));
+    document.getElementById('importTemplateGov').addEventListener('click', () => download(govTemplate(), 'budget-governance-template.xlsx'));
     document.getElementById('importFile').addEventListener('change', async (e) => {
       const f = e.target.files[0];
       if (!f) return;
       try {
-        const rows = /\.csv$/i.test(f.name) ? parseCsv(await f.text()) : await readXlsxRows(await f.arrayBuffer());
-        const res = importBudgets(rows);
+        const sheets = /\.csv$/i.test(f.name) ? [{ name: f.name, rows: parseCsv(await f.text()) }] : await readXlsxSheets(await f.arrayBuffer());
+        const res = govImport(sheets) || importBudgets(sheets[0].rows);
         importPreview = Object.assign({ file: f.name }, res.error ? { error: res.error } : res);
         if (!res.error && !res.budgets.length) importPreview.error = 'ไม่พบข้อมูลในไฟล์';
       } catch (err) {
@@ -2433,9 +2483,10 @@
         const items = x.data.items.map((it) => { const c = Object.assign({}, it, { id: nextId('i') }); delete c.line; return c; });
         const b = Object.assign({ id: nextId('b'), createdAt: at, createdBy: me().id, attachments: [], history: [], revisions: [] }, x.data,
           { items, state: 'pending_open', setup: true });
-        addHistory(b, 'ผู้คุมงบลงงบประจำปี (Import Excel) — รอ Business ขอดำเนินการใช้งบ', importPreview.file, 'งบ ' + b.code);
+        addHistory(b, 'ผู้คุมงบลงงบประจำปี (Import Excel' + (importPreview.kind === 'gov' ? ' รูปแบบ Governance' : '') + ') — รอ Business ขอดำเนินการใช้งบ', importPreview.file, 'งบ ' + b.code);
         db.budgets.push(b);
       });
+      ensureMaster(db);
       logAction('Import งบจาก Excel', '', importPreview.file + ' · ' + ok.length + ' งบ');
       save();
       importPreview = null;
@@ -2786,7 +2837,34 @@
       if (num && typeof v === 'number' && isFinite(v)) return '<c r="' + ref + '" s="1"><v>' + v + '</v></c>';
       return '<c r="' + ref + '" t="inlineStr"' + (style ? ' s="' + style + '"' : '') + '><is><t xml:space="preserve">' + xmlEsc(v) + '</t></is></c>';
     };
+    /** เซลล์ของแผ่นงานแบบกริด: ค่าธรรมดา หรือ { v, s: สไตล์, f: สูตร }  สไตล์: m เงิน · h หัวตารางอ่อน · H หัวตารางเข้ม · t ชื่อเรื่อง · b ตัวหนา · B ตัวหนา+เงิน */
+    const STY = { m: 1, h: 2, H: 3, t: 4, b: 5, B: 6 };
+    const cellG = (ref, spec) => {
+      if (spec === null || spec === undefined || spec === '') return '';
+      let v = spec;
+      let sid = 0;
+      let f = '';
+      if (typeof spec === 'object') { v = spec.v; sid = STY[spec.s] || 0; f = spec.f || ''; }
+      const sa = sid ? ' s="' + sid + '"' : '';
+      if (typeof v === 'number' && isFinite(v)) return '<c r="' + ref + '"' + sa + '>' + (f ? '<f>' + xmlEsc(f) + '</f>' : '') + '<v>' + v + '</v></c>';
+      if (v === null || v === undefined || v === '') return '';
+      return '<c r="' + ref + '" t="inlineStr"' + sa + '><is><t xml:space="preserve">' + xmlEsc(v) + '</t></is></c>';
+    };
+    const gridXml = (sh) => {
+      const fr = sh.freeze;
+      const pane = fr ? '<pane' + (fr.x ? ' xSplit="' + fr.x + '"' : '') + ' ySplit="' + fr.y + '" topLeftCell="' + colName(fr.x || 0) + (fr.y + 1) + '" activePane="' + (fr.x ? 'bottomRight' : 'bottomLeft') + '" state="frozen"/>' : '';
+      return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0">' + pane + '</sheetView></sheetViews>' +
+        '<cols>' + (sh.widths || []).map((w, i) => '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>').join('') + '</cols>' +
+        '<sheetData>' + sh.grid.map((row, ri) => {
+          const cells = row.map((spec, ci) => cellG(colName(ci) + (ri + 1), spec)).join('');
+          return cells ? '<row r="' + (ri + 1) + '">' + cells + '</row>' : '';
+        }).join('') + '</sheetData>' + (sh.filter ? '<autoFilter ref="' + sh.filter + '"/>' : '') + '</worksheet>';
+    };
+    const filterOf = (sh) => (sh.grid ? sh.filter || '' : (sh.rows.length ? 'A1:' + colName(sh.cols.length - 1) + (sh.rows.length + 1) : ''));
+    const absRef = (r) => r.replace(/([A-Z]+)(\d+)/g, (m, c, n) => '$' + c + '$' + n);
     const sheetXml = (sh) => {
+      if (sh.grid) return gridXml(sh);
       const last = colName(Math.max(sh.cols.length - 1, 0)) + (sh.rows.length + 1);
       return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
@@ -2806,20 +2884,26 @@
         '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
       ['xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' +
         sheets.map((s, i) => '<sheet name="' + xmlEsc(s.name.slice(0, 31)) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>').join('') + '</sheets>' +
-        (sheets.some((s) => s.rows.length) ? '<definedNames>' + sheets.map((s, i) => s.rows.length ? '<definedName name="_xlnm._FilterDatabase" localSheetId="' + i + '" hidden="1">\'' + xmlEsc(s.name.slice(0, 31)) + '\'!$A$1:$' + colName(s.cols.length - 1) + '$' + (s.rows.length + 1) + '</definedName>' : '').join('') + '</definedNames>' : '') +
+        (sheets.some((s) => filterOf(s)) ? '<definedNames>' + sheets.map((s, i) => filterOf(s) ? '<definedName name="_xlnm._FilterDatabase" localSheetId="' + i + '" hidden="1">\'' + xmlEsc(s.name.slice(0, 31)) + '\'!' + absRef(filterOf(s)) + '</definedName>' : '').join('') + '</definedNames>' : '') +
         '</workbook>'],
       ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
         sheets.map((s, i) => '<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>').join('') +
         '<Relationship Id="rId' + (sheets.length + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
       ['xl/styles.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
         '<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.00"/></numFmts>' +
-        '<fonts count="2"><font><sz val="11"/><name val="Tahoma"/></font><font><b/><sz val="11"/><name val="Tahoma"/></font></fonts>' +
-        '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8EEF7"/><bgColor indexed="64"/></patternFill></fill></fills>' +
+        '<fonts count="4"><font><sz val="11"/><name val="Tahoma"/></font><font><b/><sz val="11"/><name val="Tahoma"/></font>' +
+        '<font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Tahoma"/></font><font><b/><sz val="14"/><name val="Tahoma"/></font></fonts>' +
+        '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8EEF7"/><bgColor indexed="64"/></patternFill></fill>' +
+        '<fill><patternFill patternType="solid"><fgColor rgb="FF1F4E78"/><bgColor indexed="64"/></patternFill></fill></fills>' +
         '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
         '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-        '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+        '<cellXfs count="7"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
         '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
-        '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>' +
+        '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +
+        '<xf numFmtId="0" fontId="2" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>' +
+        '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+        '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+        '<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/></cellXfs>' +
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>']
     ].concat(sheets.map((s, i) => ['xl/worksheets/sheet' + (i + 1) + '.xml', sheetXml(s)]));
     // ZIP แบบไม่บีบอัด (stored)
@@ -2852,7 +2936,255 @@
     return out;
   }
 
+
+  // ---------------------------------------------------------------- รูปแบบไฟล์ Capex / Opex Governance Framework (ใช้ทั้ง Export และไฟล์ตัวอย่าง Import)
+
+  /** สถานะอนุมัติของงบ ตามคอลัมน์ "สถานะอนุมัติ" ในไฟล์ */
+  const govStatus = (b) => {
+    const st = b.state || 'active';
+    if (st === 'cancelled') return 'ยกเลิก';
+    return ['active', 'pending_open', 'open_review', 'open_returned'].includes(st) ? 'อนุมัติแล้ว' : 'รออนุมัติ';
+  };
+  const GOV_HEAD_CAPEX = ['Capex ID', 'ชื่อโครงการ', 'หน่วยงานที่ขอ', 'กลุ่ม Priority', 'กลุ่ม Priority การลงทุน\n(กลุ่มการลงทุน New)', 'เหตุผลสนับสนุน Priority (ย่อ)',
+    'มูลค่า Capex รวม (บาท)', 'เฉลี่ยปีที่ลงทุน', 'Owner \n(หลัก 1 คน)', 'เจ้าของฝ่ายการเงิน \n(ติดตามร่วม)', 'สถานะอนุมัติ'];
+  const GOV_HEAD_OPEX = ['Opex ID', 'ชื่อรายการ/โครงการ', 'หน่วยงานที่ขอ', 'กลุ่ม Priority', 'เหตุผลสนับสนุน Priority (ย่อ)', 'มูลค่ารวมที่ขออนุมัติ (บาท)',
+    'ปีงบประมาณ', 'เจ้าของ Action Plan (หน่วยงาน)', 'เจ้าของฝ่ายการเงิน (ติดตามร่วม)', 'สถานะอนุมัติ'];
+  const GOV_HEAD_SUMMARY = ['กลุ่มรายการ', 'ID', 'หน่วยงานที่ขอ', 'ชื่อรายการ/โครงการ', 'มูลค่า', 'ประเภทงบประมาณ'];
+  const GOV_NO_GROUP = '(ไม่ระบุกลุ่ม)';
+
+  /** ระเบียนกลางของแต่ละงบสำหรับเขียนลงไฟล์ */
+  const govRec = (b) => ({
+    type: b.type, code: b.code, name: b.name, dept: b.department || '', prio: b.priorityGroup || '', invest: b.investGroup || '', reason: b.priorityReason || '',
+    total: budgetTotal(b), year: b.fiscalYear, owner: ownerText(b), fin: b.financeOwner || '', status: govStatus(b), group: b.listGroup || ''
+  });
+
+  /** แผ่น Capex Request / Opex Request: แถว 1 ชื่อเรื่อง · แถว 2 คำอธิบาย + ยอดรวม (SUBTOTAL) · แถว 3 หัวตาราง · แถว 4 เป็นต้นไป ข้อมูล */
+  function govListSheet(kind, co, recs, subtitle) {
+    const capex = kind === 'CAPEX';
+    const head = capex ? GOV_HEAD_CAPEX : GOV_HEAD_OPEX;
+    const n = recs.length;
+    const totalCol = 6; // G (CAPEX) / F (OPEX)
+    const tc = capex ? 'G' : 'F';
+    const total = round2(recs.reduce((x, r) => x + r.total, 0));
+    const title = [{ v: capex ? 'CAPEX REQUEST & FINANCIAL STATEMENT LINKAGE' : 'OPEX REQUEST & FINANCIAL STATEMENT LINKAGE', s: 't' }];
+    const sub = [subtitle];
+    const tcIdx = capex ? 6 : 5;
+    while (sub.length < tcIdx) sub.push(null);
+    sub.push({ v: total, f: 'SUBTOTAL(9,' + tc + '4:' + tc + (3 + n) + ')', s: 'B' });
+    const grid = [title, sub, head.map((h) => ({ v: h, s: 'H' }))];
+    recs.forEach((r) => grid.push(capex
+      ? [r.code, r.name, r.dept, r.prio, r.invest, r.reason, { v: r.total, s: 'm' }, r.year, r.owner, r.fin, r.status]
+      : [r.code, r.name, r.dept, r.prio, r.reason, { v: r.total, s: 'm' }, r.year, r.owner, r.fin, r.status]));
+    return {
+      name: co + (capex ? ' Capex Request' : ' Opex Request'), grid, gov: true, kind: capex ? 'capex' : 'opex', count: n,
+      widths: capex ? [22, 41, 14, 27, 30, 43, 19, 15, 16, 18, 14] : [18, 39, 14, 24, 41, 19, 12, 22, 22, 14],
+      freeze: { x: 3, y: 3 }, filter: 'A3:' + colName(head.length - 1) + (3 + Math.max(n, 1)), totalCol
+    };
+  }
+  const colName = (i) => { let t = ''; let k = i + 1; while (k > 0) { const m = (k - 1) % 26; t = String.fromCharCode(65 + m) + t; k = Math.floor((k - 1) / 26); } return t; };
+
+  /** แผ่น "สรุปโปรเจ็ค": ตารางรายโครงการจัดกลุ่มตามกลุ่มรายการ (คอลัมน์ B–G) + ตารางสรุปหน่วยงาน × CAPEX / OPEX (คอลัมน์ J–N เป็นค่าคงที่ ไม่ใช่ Pivot Table) */
+  function govSummarySheet(co, recs, subtitle) {
+    const grpOf = (r) => r.group || GOV_NO_GROUP;
+    const sorted = recs.slice().sort((x, y) => (grpOf(x) === GOV_NO_GROUP) - (grpOf(y) === GOV_NO_GROUP) || grpOf(x).localeCompare(grpOf(y), 'th', { numeric: true }) || String(x.code).localeCompare(String(y.code), 'th', { numeric: true }));
+    const years = uniq(recs.map((r) => r.year)).sort().join(', ');
+    const rows = [];
+    rows[0] = [null, { v: 'List โครงการ ' + co + (years ? ' ' + years : ''), s: 't' }];
+    rows[1] = [null, subtitle];
+    rows[3] = [null].concat(GOV_HEAD_SUMMARY.map((h) => ({ v: h, s: 'H' })));
+    const row = (i) => { if (!rows[i]) rows[i] = []; return rows[i]; };
+    sorted.forEach((r, k) => {
+      const t = row(4 + k);
+      t[1] = grpOf(r); t[2] = r.code; t[3] = r.dept; t[4] = r.name; t[5] = { v: r.total, s: 'm' }; t[6] = T_GOV(r.type);
+    });
+    // ตารางสรุป
+    const put = (i, c, v) => { row(i)[c] = v; };
+    put(3, 9, { v: 'Sum of มูลค่า', s: 'H' }); put(3, 10, { v: '', s: 'H' }); put(3, 11, { v: 'Column Labels', s: 'H' }); put(3, 12, { v: '', s: 'H' }); put(3, 13, { v: '', s: 'H' });
+    ['Row Labels', 'หน่วยงานที่ขอ', 'CAPEX', 'OPEX', 'Grand Total'].forEach((h, k) => put(4, 9 + k, { v: h, s: 'H' }));
+    let pr = 5;
+    const sum = (list, t) => round2(list.filter((r) => !t || r.type === t).reduce((x, r) => x + r.total, 0));
+    uniq(sorted.map(grpOf)).forEach((g) => {
+      const inG = sorted.filter((r) => grpOf(r) === g);
+      uniq(inG.map((r) => r.dept || '(ไม่ระบุ)')).sort().forEach((d, k) => {
+        const inD = inG.filter((r) => (r.dept || '(ไม่ระบุ)') === d);
+        if (k === 0) put(pr, 9, g);
+        put(pr, 10, d); put(pr, 11, { v: sum(inD, 'CAPEX'), s: 'm' }); put(pr, 12, { v: sum(inD, 'CBS'), s: 'm' }); put(pr, 13, { v: sum(inD), s: 'm' });
+        pr += 1;
+      });
+      put(pr, 9, { v: g + ' Total', s: 'b' }); put(pr, 11, { v: sum(inG, 'CAPEX'), s: 'B' }); put(pr, 12, { v: sum(inG, 'CBS'), s: 'B' }); put(pr, 13, { v: sum(inG), s: 'B' });
+      pr += 1;
+    });
+    put(pr, 9, { v: 'Grand Total', s: 'b' }); put(pr, 11, { v: sum(sorted, 'CAPEX'), s: 'B' }); put(pr, 12, { v: sum(sorted, 'CBS'), s: 'B' }); put(pr, 13, { v: sum(sorted), s: 'B' });
+    const grid = [];
+    for (let i = 0; i < rows.length; i++) grid.push(rows[i] || []);
+    return {
+      name: co + ' สรุปโปรเจ็ค', grid, gov: true, kind: 'summary', count: sorted.length,
+      widths: [4, 28, 18, 14, 60, 17, 16, 4, 4, 30, 16, 16, 14, 16], freeze: { x: 0, y: 4 }, filter: 'B4:G' + (4 + Math.max(sorted.length, 1))
+    };
+  }
+  const T_GOV = (t) => (t === 'CAPEX' ? 'CAPEX' : 'OPEX');
+
+  /** แผ่นงาน Governance จากระเบียนที่จัดตามบริษัท { บริษัท: [govRec] } : สรุปโปรเจ็ค · Capex Request · Opex Request */
+  function govSheetsOf(byCo, subtitle) {
+    const out = [];
+    Object.keys(byCo).sort().forEach((co) => {
+      const mine = byCo[co];
+      out.push(govSummarySheet(co, mine, subtitle));
+      const caps = mine.filter((r) => r.type === 'CAPEX');
+      const ops = mine.filter((r) => r.type === 'CBS');
+      if (caps.length) out.push(govListSheet('CAPEX', co, caps, 'รายการคำขอ CAPEX · ' + subtitle));
+      if (ops.length) out.push(govListSheet('OPEX', co, ops, 'รายการคำขอ OPEX · ' + subtitle));
+    });
+    return out;
+  }
+  /** แผ่นงาน Governance ของงบทั้งหมด แยกตามบริษัท */
+  function govSheets(budgets) {
+    const byCo = {};
+    budgets.slice().sort((x, y) => String(x.code).localeCompare(String(y.code), 'th', { numeric: true })).forEach((b) => { (byCo[b.company] = byCo[b.company] || []).push(govRec(b)); });
+    return govSheetsOf(byCo, 'ส่งออกจากระบบขอเบิกใช้งบประมาณ ณ ' + new Date().toISOString().slice(0, 10) + ' · สถานะอนุมัติคำนวณจากสถานะงบในระบบ');
+  }
+
+  // ---------------------------------------------------------------- Import รูปแบบ Governance (ไฟล์ Capex / Opex Governance Framework)
+
+  const normTxt = (x) => String(x == null ? '' : x).replace(/\s+/g, '').toLowerCase();
+  const GOV_APPROVED = 'อนุมัติแล้ว';
+
+  /** ไฟล์ตัวอย่างรูปแบบ Governance (ข้อมูลสมมติทั้งหมด) */
+  function govTemplate() {
+    const co = (db.master.companies[0] || {}).code || 'PBI';
+    const y = new Date().getFullYear() + 1;
+    const dept = (db.master.departments[0] || {}).name || 'ฝ่ายตัวอย่าง';
+    const owner = (USERS.filter(canRequestUser)[0] || {}).name || 'ชื่อ นามสกุล';
+    const pg = (db.master.priorityGroups || []).map((x) => x.name);
+    const rec = (type, n, name, total, group, prio, invest) => ({ type, code: (type === 'CAPEX' ? 'CX-' : 'OX-') + y + '-' + String(n).padStart(3, '0'), name, dept, prio: prio || pg[0] || '', invest: invest || '', reason: 'ตัวอย่างเหตุผลสนับสนุน',
+      total, year: y, owner, fin: 'ชื่อ นามสกุล (การเงิน)', status: GOV_APPROVED, group });
+    const recs = [
+      rec('CAPEX', 1, 'ตัวอย่าง: เครื่องจักรสายการผลิตใหม่', 1800000, 'กลุ่มรายการ ก', pg[0], 'กลุ่มการลงทุน ก'),
+      rec('CAPEX', 2, 'ตัวอย่าง: ปรับปรุงอาคารคลังสินค้า', 500000, 'กลุ่มรายการ ข', pg[1], 'กลุ่มการลงทุน ข'),
+      rec('CBS', 1, 'ตัวอย่าง: ค่าใช้จ่ายดำเนินงานประจำปี', 240000, 'กลุ่มรายการ ก', pg[3])
+    ];
+    const guide = [
+      ['รูปแบบเดียวกับไฟล์ Capex / Opex Governance Framework และไฟล์ที่ระบบ Export (เลือก "รูปแบบไฟล์ Governance")'],
+      ['ชื่อแผ่นงานขึ้นต้นด้วยรหัสบริษัท แล้วตามด้วย "Capex Request" หรือ "Opex Request" เช่น "' + co + ' Capex Request" — ระบบใช้ชื่อแผ่นงานระบุบริษัท'],
+      ['หัวตารางอยู่แถวที่ 3 ข้อมูลเริ่มแถวที่ 4 (ระบบหาแถวหัวตารางจาก "Capex ID" / "Opex ID" ให้เอง) · แถวที่ไม่มี ID (เช่น แถวรวม) จะถูกข้าม'],
+      ['นำเข้าเฉพาะแถวที่ "สถานะอนุมัติ" = "' + GOV_APPROVED + '" · แถวอื่นถูกข้าม และแจ้งในหน้าตรวจข้อมูล'],
+      ['แผ่น "สรุปโปรเจ็ค" (ถ้ามี) ใช้อ่าน "กลุ่มรายการ" ของแต่ละ ID · ตาราง Pivot ด้านขวาไม่ถูกนำเข้า'],
+      ['มูลค่า = วงเงินรวมต่อโครงการ (ไม่แยก Item) · CAPEX นำเข้าเป็น "งบรวมทั้งโครงการ" · OPEX นำเข้าเป็น Item หลักเดียว'],
+      ['Owner / ชื่อเจ้าของ: ถ้าตรงกับชื่อผู้ใช้ในระบบจะผูกให้อัตโนมัติ ถ้าไม่ตรงจะเก็บเป็นชื่อตามไฟล์ แล้วผู้คุมงบเลือกผู้ใช้ที่หน้าแก้ไขงบ'],
+      ['หลัง Import งบอยู่สถานะ "ยังไม่เปิดใช้งบ" — Business ขอดำเนินการใช้งบ (CAPEX: ผู้คุมงบยืนยัน · OPEX: เปิดใช้ทันที)']
+    ];
+    return buildXlsx(govSheetsOf({ [co]: recs }, 'ไฟล์ตัวอย่าง (ข้อมูลสมมติ)').concat([{ name: 'คำอธิบาย', cols: [{ h: 'วิธีกรอก', w: 130 }], rows: guide }]));
+  }
+
+  /**
+   * อ่านไฟล์รูปแบบ Governance → { budgets, skipped, notes } · คืน null ถ้าไฟล์นี้ไม่ใช่รูปแบบ Governance
+   * sheets = [{ name, rows }]
+   */
+  function govImport(sheets) {
+    const headOf = (sh, test) => {
+      for (let i = 0; i < Math.min(sh.rows.length, 12); i++) {
+        const h = (sh.rows[i] || []).map(normTxt);
+        const r = test(h);
+        if (r) return { i, h, r };
+      }
+      return null;
+    };
+    const lists = [];
+    const summaries = [];
+    sheets.forEach((sh) => {
+      const l = headOf(sh, (h) => (h.includes('capexid') ? 'CAPEX' : h.includes('opexid') ? 'CBS' : ''));
+      if (l) { lists.push({ sh, i: l.i, h: l.h, type: l.r }); return; }
+      const sm = headOf(sh, (h) => h.includes('กลุ่มรายการ') && h.includes('id'));
+      if (sm) summaries.push({ sh, i: sm.i, h: sm.h });
+    });
+    if (!lists.length) return null;
+    const groupOf = {};
+    summaries.forEach(({ sh, i, h }) => {
+      const gi = h.indexOf('กลุ่มรายการ');
+      const ii = h.indexOf('id');
+      sh.rows.slice(i + 1).forEach((r) => {
+        const id = String(r[ii] == null ? '' : r[ii]).trim();
+        const g = String(r[gi] == null ? '' : r[gi]).trim();
+        if (id && g && g !== GOV_NO_GROUP && !(id in groupOf)) groupOf[id] = g;
+      });
+    });
+    const owners = USERS.filter(canRequestUser);
+    const findOwner = (v) => (normTxt(v) ? owners.find((x) => [x.id, x.name, x.email].filter(Boolean).map(normTxt).includes(normTxt(v))) : null);
+    const num = (v) => (typeof v === 'number' ? v : Number(String(v).replace(/[,\s฿]/g, '')));
+    const asYear = (v) => {
+      const m = String(v == null ? '' : v).match(/(\d{4})/);
+      if (!m) return 0;
+      const y = Number(m[1]);
+      return y >= 2400 ? y - 543 : y;
+    };
+    const budgets = [];
+    const skipped = [];
+    const seen = new Set();
+    const newCos = new Set();
+    const newDepts = new Set();
+    lists.forEach(({ sh, i, h, type }) => {
+      const col = (test) => h.findIndex((x) => x && test(x));
+      const ix = {
+        id: col((x) => x === 'capexid' || x === 'opexid'), name: col((x) => x.startsWith('ชื่อโครงการ') || x.startsWith('ชื่อรายการ')),
+        dept: col((x) => x.startsWith('หน่วยงานที่ขอ')), prio: col((x) => x === 'กลุ่มpriority'), invest: col((x) => x.startsWith('กลุ่มpriorityการลงทุน')),
+        reason: col((x) => x.startsWith('เหตุผลสนับสนุน')), amount: col((x) => x.startsWith('มูลค่า')), year: col((x) => x.startsWith('เฉลี่ยปี') || x === 'ปีงบประมาณ'),
+        owner: col((x) => x.startsWith('owner') || x.startsWith('เจ้าของactionplan')), fin: col((x) => x.startsWith('เจ้าของฝ่ายการเงิน')), status: col((x) => x.startsWith('สถานะอนุมัติ'))
+      };
+      const m = String(sh.name).match(/^(.*?)\s*(capex|opex)\s*request/i);
+      const coRaw = m ? m[1].trim() : '';
+      const known = (db.master.companies || []).find((c) => normTxt(c.code) === normTxt(coRaw));
+      const company = known ? known.code : coRaw;
+      const get = (r, k) => (ix[k] >= 0 && r[ix[k]] !== undefined && r[ix[k]] !== null ? String(r[ix[k]]).trim() : '');
+      sh.rows.slice(i + 1).forEach((r, k) => {
+        const line = i + k + 2;
+        const code = get(r, 'id');
+        const name = get(r, 'name');
+        if (!code && !name) return;
+        const errors = [];
+        const warnings = [];
+        if (!code) errors.push('แถว ' + line + ' ไม่มี ID');
+        if (ix.status >= 0 && normTxt(get(r, 'status')) !== normTxt(GOV_APPROVED)) {
+          skipped.push({ sheet: sh.name, line, code, status: get(r, 'status') });
+          return;
+        }
+        if (!coRaw) errors.push('ระบุบริษัทไม่ได้ — ตั้งชื่อแผ่นงานเป็น "<รหัสบริษัท> ' + (type === 'CAPEX' ? 'Capex' : 'Opex') + ' Request"');
+        else if (!known) newCos.add(coRaw);
+        if (!name) errors.push('ไม่ได้ระบุชื่อโครงการ');
+        const amount = round2(num(get(r, 'amount')));
+        if (!(amount > 0)) errors.push('มูลค่าต้องมากกว่า 0 (ถ้าเป็นสูตร ให้เปิดไฟล์ใน Excel แล้วบันทึกอีกครั้ง เพื่อให้มีค่าที่คำนวณแล้ว)');
+        if (code) {
+          if (seen.has(code)) errors.push('ID "' + code + '" ซ้ำในไฟล์'); else seen.add(code);
+          if (db.budgets.some((b) => b.code === code && b.state !== 'cancelled')) errors.push('ID "' + code + '" มีอยู่แล้วในระบบ');
+        }
+        const dept = get(r, 'dept');
+        if (!dept) warnings.push('ไม่ได้ระบุหน่วยงานที่ขอ');
+        else if (!db.master.departments.some((d) => d.name === dept)) newDepts.add(dept);
+        const ownerRaw = get(r, 'owner');
+        const owner = findOwner(ownerRaw);
+        if (!ownerRaw) warnings.push('ไม่ได้ระบุ Owner');
+        else if (!owner) warnings.push('ยังไม่พบผู้ใช้ชื่อ "' + ownerRaw + '" ในระบบ — เก็บเป็นชื่อตามไฟล์ (ผู้คุมงบผูกกับผู้ใช้ได้ที่หน้าแก้ไขงบ)');
+        const fy = asYear(get(r, 'year'));
+        if (!fy) warnings.push('ไม่พบปีงบประมาณ — ใช้ปี ' + (new Date().getFullYear() + 1));
+        const item = type === 'CAPEX'
+          ? { id: '', code: code || '-', name: 'งบรวมทั้งโครงการ', amount, vat: 0, qty: '', unit: '', glCode: '', glName: '', assetType: assetTypeList()[0] || '' }
+          : { id: '', code: '1', name: 'รวมทั้งโครงการ', amount, vat: 0, qty: '', unit: '', glCode: '', glName: '' };
+        const data = {
+          type, code, name, company, fiscalYear: fy || new Date().getFullYear() + 1, group: '', department: dept,
+          ownerId: owner ? owner.id : '', ownerName: owner ? '' : ownerRaw, structure: type === 'CAPEX' ? 'project' : 'items', note: '', items: [item],
+          listGroup: groupOf[code] || '', priorityGroup: get(r, 'prio'), investGroup: type === 'CAPEX' ? get(r, 'invest') : '',
+          priorityReason: get(r, 'reason'), financeOwner: get(r, 'fin'), meeting: { date: '', no: '', note: '', by: '' }
+        };
+        budgets.push({ data, errors, warnings, lines: 1, sheet: sh.name });
+      });
+    });
+    const notes = [];
+    if (newCos.size) notes.push('บริษัทที่ยังไม่มีในข้อมูลหลัก (จะเพิ่มให้อัตโนมัติ): ' + Array.from(newCos).join(', '));
+    if (newDepts.size) notes.push('หน่วยงานที่ยังไม่มีในข้อมูลหลัก (จะเพิ่มให้อัตโนมัติ): ' + Array.from(newDepts).join(', '));
+    return { kind: 'gov', budgets, skipped, notes, sheets: lists.length };
+  }
+
   const EXPORT_SHEETS = [
+    ['gov', 'รูปแบบไฟล์ Governance', 'เหมือนไฟล์ Capex / Opex Governance Framework: แยกตามบริษัท ได้ แผ่น "สรุปโปรเจ็ค", "Capex Request", "Opex Request" — นำกลับเข้าระบบด้วย Import ได้'],
     ['budgets', 'งบประมาณ', 'สรุปรายงบ: งบอนุมัติ ตัดงบแล้ว จองไว้ คงเหลือ'],
     ['items', 'Item', 'รายการ Item ของแต่ละงบ พร้อม GL / ประเภทสินทรัพย์ และยอดคงเหลือ'],
     ['requests', 'เบิกใช้งบ', 'คำขอ / ใบเบิกใช้งบ: เลขที่ ประเภท สถานะ ยอดเงิน ยอดตัดงบ ปิดยอด'],
@@ -2871,13 +3203,14 @@
     const day = (v) => (v ? String(v).slice(0, 10) : '');
     const T = (t) => TYPE_SHORT[t] || t;
     const sheets = [];
+    if (f.sheets.includes('gov')) govSheets(budgets).forEach((g) => sheets.push(g));
     const add = (key, cols, rows) => { if (f.sheets.includes(key)) sheets.push({ name: EXPORT_SHEETS.find((x) => x[0] === key)[1], cols, rows }); };
     const N = (h, w) => ({ h, w: w || 15, num: true });
     const S = (h, w) => ({ h, w: w || 14 });
 
     add('budgets', [S('บริษัท', 8), S('ประเภทงบ', 9), S('ปีงบประมาณ', 10), S('กลุ่มงบ', 8), S('รหัสโครงการ'), S('ชื่อโครงการ', 34), S('หน่วยงาน', 16), S('Business เจ้าของงบ', 18),
       S('สถานะ', 12), S('โครงสร้าง', 14), S('เลขที่มติ / อนุมัติ', 22), S('วันที่อนุมัติ', 12), N('งบอนุมัติ (รวม VAT)', 17), N('ตัดงบแล้ว'), N('จองไว้'), N('คงเหลือ')],
-    budgets.map((b) => { const u = usage(b); return [b.company, T(b.type), b.fiscalYear, b.group || '', b.code, b.name, b.department, userName(b.ownerId), BUDGET_STATE[b.state || 'active'] || '',
+    budgets.map((b) => { const u = usage(b); return [b.company, T(b.type), b.fiscalYear, b.group || '', b.code, b.name, b.department, ownerText(b), BUDGET_STATE[b.state || 'active'] || '',
       b.structure === 'project' ? 'งบรวมทั้งโครงการ' : 'แยก Item', (b.meeting || {}).no || '', day((b.meeting || {}).date), budgetTotal(b), u.used, u.reserved, u.remaining]; }));
 
     const itemRows = [];
@@ -2955,7 +3288,10 @@
       sheets: Array.from(form.querySelectorAll('[name="sheet"]:checked')).map((x) => x.value) });
     const counts = () => {
       const all = exportData(Object.assign(filters(), { sheets: EXPORT_SHEETS.map((x) => x[0]) }));
-      EXPORT_SHEETS.forEach(([k, t]) => { const s = all.find((x) => x.name === t); form.querySelector('[data-count="' + k + '"]').textContent = (s ? s.rows.length : 0).toLocaleString('th-TH') + ' แถว'; });
+      EXPORT_SHEETS.forEach(([k, t]) => {
+        const n = k === 'gov' ? all.filter((x) => x.gov && x.kind !== 'summary').reduce((c, x) => c + x.count, 0) : ((all.find((x) => x.name === t) || {}).rows || []).length;
+        form.querySelector('[data-count="' + k + '"]').textContent = n.toLocaleString('th-TH') + (k === 'gov' ? ' งบ' : ' แถว');
+      });
     };
     form.addEventListener('change', counts);
     counts();
@@ -3060,13 +3396,13 @@
       '<article class="doc"><header><div><h1>' + esc(companyMap()[b.company] || b.company) + '</h1><div class="doc-sub">' + (isCapex ? 'แบบขออนุมัติงบประมาณ ' : 'แบบขออนุมัติงบประมาณ (เสนอผู้บริหาร) ') +
       (isCapex ? '(งบลงทุน CAPEX)' : '(งบดำเนินงาน OPEX)') + '</div></div><div class="docno">ปีงบประมาณ <strong>' + esc(b.fiscalYear) + '</strong><br>พิมพ์วันที่ ' + fmtDay(new Date().toISOString()) + '</div></header>' +
       '<div class="section"><table><tbody>' + tr('รหัสโครงการ', esc(b.code)) + tr('ชื่อโครงการ', esc(b.name)) + tr('หน่วยงาน', esc(b.department)) +
-      tr('ผู้ขออนุมัติ (Business)', esc(userName(b.ownerId))) + (b.group ? tr('กลุ่มงบประมาณ', esc(b.group)) : '') + tr('ความจำเป็น / หมายเหตุ', esc(b.note || '-')) + '</tbody></table></div>' +
+      tr('ผู้ขออนุมัติ (Business)', esc(ownerLabel(b))) + (b.group ? tr('กลุ่มงบประมาณ', esc(b.group)) : '') + tr('ความจำเป็น / หมายเหตุ', esc(b.note || '-')) + '</tbody></table></div>' +
       '<div class="section"><h2>รายการที่ขออนุมัติ</h2><table><thead><tr><th style="width:2rem">#</th><th>รายการ</th><th class="num">วงเงิน (รวม VAT)</th></tr></thead><tbody>' + rows +
       '<tr><th colspan="2" class="right">รวมทั้งสิ้น</th><td class="num"><strong>' + money(budgetTotal(b)) + '</strong></td></tr></tbody></table></div>' +
       '<div class="section"><h2>' + apprOf(b.type).result + '</h2><table><tbody>' +
       tr(isCapex ? 'มติ' : 'ผลการพิจารณา', '☐ อนุมัติเต็มจำนวน &nbsp; ☐ อนุมัติบางส่วน จำนวน ........................ บาท &nbsp; ☐ ไม่อนุมัติ') +
       tr(isCapex ? 'ครั้งที่ / วันที่ประชุม' : 'วันที่อนุมัติ', '.......................................') + tr('หมายเหตุ', '<br><br>') + '</tbody></table></div>' +
-      '<div class="signs"><div><div class="line"></div>ผู้ขออนุมัติ<br>' + esc(userName(b.ownerId)) + '</div><div><div class="line"></div>ผู้บังคับบัญชา</div><div><div class="line"></div>' + (isCapex ? 'ประธานที่ประชุม' : 'ผู้บริหารผู้อนุมัติ') + '</div></div>' +
+      '<div class="signs"><div><div class="line"></div>ผู้ขออนุมัติ<br>' + esc(ownerLabel(b)) + '</div><div><div class="line"></div>ผู้บังคับบัญชา</div><div><div class="line"></div>' + (isCapex ? 'ประธานที่ประชุม' : 'ผู้บริหารผู้อนุมัติ') + '</div></div>' +
       '</article>';
   }
 
@@ -4603,6 +4939,18 @@
     { key: 'groups', title: 'กลุ่มงบประมาณ (CAPEX)', hint: 'กลุ่มงบที่อยู่ในรหัสรายการย่อย เช่น 2026-01-EN001 → กลุ่ม 01', lock: true,
       cols: [{ k: 'code', label: 'รหัสกลุ่ม', w: '10rem' }, { k: 'name', label: 'ชื่อกลุ่มงบ' }],
       inUse: (it) => db.budgets.some((b) => b.group === it.code) },
+    { key: 'listGroups', title: 'กลุ่มรายการ', hint: 'จัดกลุ่มโครงการตามที่ใช้ในไฟล์สรุปโปรเจ็ค เช่น "1. วงศ์สว่าง" (ตั้งว่างไว้ได้ — Import จากไฟล์จะเพิ่มให้เอง)', lock: false, optional: true,
+      cols: [{ k: 'name', label: 'กลุ่มรายการ' }],
+      inUse: (it) => db.budgets.some((b) => b.listGroup === it.name),
+      rename: (from, to) => db.budgets.forEach((b) => { if (b.listGroup === from) b.listGroup = to; }) },
+    { key: 'priorityGroups', title: 'กลุ่ม Priority', hint: 'ตัวเลือก "กลุ่ม Priority" ของงบทุกประเภท', lock: false,
+      cols: [{ k: 'name', label: 'กลุ่ม Priority' }],
+      inUse: (it) => db.budgets.some((b) => b.priorityGroup === it.name),
+      rename: (from, to) => db.budgets.forEach((b) => { if (b.priorityGroup === from) b.priorityGroup = to; }) },
+    { key: 'investGroups', title: 'กลุ่ม Priority การลงทุน (CAPEX)', hint: 'ตัวเลือก "กลุ่ม Priority การลงทุน (กลุ่มการลงทุน New)" ของงบ CAPEX (ตั้งว่างไว้ได้ — Import จากไฟล์จะเพิ่มให้เอง)', lock: false, optional: true,
+      cols: [{ k: 'name', label: 'กลุ่ม Priority การลงทุน' }],
+      inUse: (it) => db.budgets.some((b) => b.investGroup === it.name),
+      rename: (from, to) => db.budgets.forEach((b) => { if (b.investGroup === from) b.investGroup = to; }) },
     { key: 'assetTypes', title: 'ประเภทสินทรัพย์ (CAPEX)', hint: 'ตัวเลือกประเภทสินทรัพย์ของรายการย่อย', lock: false,
       cols: [{ k: 'name', label: 'ประเภทสินทรัพย์' }],
       inUse: (it) => db.budgets.some((b) => b.type === 'CAPEX' && b.items.some((i) => i.assetType === it.name)),
@@ -4624,7 +4972,7 @@
 
   /** เมนูย่อยของข้อมูลหลัก: [key, ชื่อเมนู] */
   const MASTER_NAV = [['companies', 'บริษัท'], ['departments', 'หน่วยงาน'], ['groups', 'กลุ่มงบประมาณ'], ['assetTypes', 'ประเภทสินทรัพย์'],
-    ['expenseCategories', 'หมวดค่าใช้จ่าย'], ['glCodes', 'GL Code'], ['memoParties', 'ผู้ลงนาม Memo']];
+    ['expenseCategories', 'หมวดค่าใช้จ่าย'], ['glCodes', 'GL Code'], ['memoParties', 'ผู้ลงนาม Memo'], ['listGroups', 'กลุ่มรายการ'], ['priorityGroups', 'กลุ่ม Priority'], ['investGroups', 'กลุ่ม Priority การลงทุน']];
 
   function masterRow(sec, it, isNew) {
     return '<tr data-orig="' + (isNew ? '' : esc(it[sec.cols[0].k])) + '">' + sec.cols.map((c, i) => (c.type === 'image'
@@ -4706,7 +5054,7 @@
           return it;
         }).filter((it) => it[keyCol] || it.orig);
         const errors = [];
-        if (!rows.length) errors.push('ต้องมีอย่างน้อย 1 รายการ');
+        if (!rows.length && !sec.optional) errors.push('ต้องมีอย่างน้อย 1 รายการ');
         rows.forEach((it) => { if (!it[keyCol]) errors.push('กรุณากรอก' + sec.cols[0].label); });
         const keys = rows.map((it) => it[keyCol].toLowerCase());
         if (keys.some((k, i) => k && keys.indexOf(k) !== i)) errors.push(sec.cols[0].label + 'ซ้ำกัน');
@@ -5213,7 +5561,7 @@
     if (!list.length) return '<div class="card empty">ไม่มีรายการ</div>';
     return '<div class="table-wrap"><table><thead><tr><th>งบ</th><th>Business</th><th>มติ / เอกสารอนุมัติ / Memo</th><th class="num">วงเงิน</th><th>ส่งเมื่อ</th></tr></thead><tbody>' +
       list.map((b) => '<tr><td>' + badge(b.type, TYPE_SHORT[b.type]) + ' <a href="#/budget/' + b.id + '">' + esc(b.code) + '</a><div class="muted">' + esc(b.name) + '</div></td>' +
-        '<td class="nowrap">' + esc(userName(b.ownerId)) + '</td><td>' + (b.openMemo
+        '<td class="nowrap">' + esc(ownerLabel(b)) + '</td><td>' + (b.openMemo
           ? 'Memo ' + esc(b.openMemo.no) + '<div class="muted">' + (b.openMemo.files || []).length + ' ไฟล์' + (b.openMemo.signers ? ' · ' + esc(b.openMemo.signers) : '') + '</div>'
           : esc((b.meeting && b.meeting.no) || '-') + '<div class="muted">' + (b.attachments || []).length + ' ไฟล์</div>') + '</td>' +
         '<td class="num">' + money(budgetTotal(b)) + '</td><td class="nowrap">' + fmtDay(b.submittedAt || (b.history.slice(-1)[0] || {}).at) + '</td></tr>').join('') + '</tbody></table></div>';
@@ -5426,6 +5774,7 @@
       ['ระบบ', 'Admin ทำอะไรได้', 'ดูแลข้อมูลหลัก ดู Log ทั้งระบบ และจัดการผู้ใช้/สิทธิ์ · ดูงบได้ทั้งหมดแต่ไม่ทำรายการ'],
       ['ระบบ', 'ผู้ใช้ทั่วไปเห็นประวัติแค่ไหน', 'เห็น "ประวัติการทำรายการ" ที่ตนทำ และที่ผู้อื่นทำกับงบ/เอกสารของตน (ไม่เห็น Log ทั้งระบบ)'],
       ['ตั้งงบ', 'Journey งบประจำปี', 'CAPEX: ผู้คุมงบลงงบของแต่ละปี (กดสร้าง หรือ Import Excel) → งบรอ Business เจ้าของงบเปิดใช้ครั้งแรก (เปิดทั้งงบทีเดียว) → Business ทำ Memo ขอดำเนินการใช้งบ ให้ผู้บริหารเซ็น แนบไฟล์ที่เซ็นแล้วส่ง → ผู้คุมงบตรวจ Memo แล้วยืนยัน (หรือส่งกลับให้แก้) · ผู้คุมงบแก้ / ยกเลิกงบที่ลงไว้ได้จนกว่า Business ส่ง Memo หรือขอดำเนินการใช้งบ · OPEX: Business เป็นผู้สร้างงบเอง (ผู้คุมงบลง / Import OPEX ไม่ได้) — ดูแถว "OPEX Business สร้างและส่งอนุมัติเอง"'],
+      ['ตั้งงบ', 'ช่องข้อมูลตามไฟล์ Capex / Opex Governance Framework', 'งบทุกประเภทมีช่อง: รหัส (Capex ID / Opex ID) · ชื่อโครงการ · หน่วยงานที่ขอ · กลุ่ม Priority · เหตุผลสนับสนุน Priority (ย่อ) · มูลค่ารวม · ปี (เฉลี่ยปีที่ลงทุน / ปีงบประมาณ) · Owner / เจ้าของ Action Plan · เจ้าของฝ่ายการเงิน (ติดตามร่วม) · สถานะอนุมัติ (คำนวณจากสถานะงบ) · กลุ่มรายการ · CAPEX เพิ่ม: กลุ่ม Priority การลงทุน (New) · ตัวเลือกกลุ่มต่าง ๆ ตั้งได้ที่ข้อมูลหลัก'],
       ['ตั้งงบ', 'Import งบจาก Excel', 'ไฟล์ .xlsx หรือ .csv ตามไฟล์ตัวอย่าง: 1 แถว = 1 Item · รหัสโครงการเดียวกัน = งบเดียวกัน · Business เจ้าของงบใส่ชื่อหรือรหัสผู้ใช้ · ตรวจข้อมูลก่อนนำเข้า (บริษัท / หน่วยงานตามข้อมูลหลัก, รหัสซ้ำ, วงเงิน > 0) งบที่ผิดไม่ถูกนำเข้า · นำเข้าได้เฉพาะ CAPEX'],
       ['ตั้งงบ', 'OPEX Business สร้างและส่งอนุมัติเอง', 'Business สร้างงบ OPEX (ร่าง) เอง → พิมพ์แบบฟอร์มของระบบ หรือใช้เอกสารขออนุมัติของตนเอง ส่งผู้บริหารอนุมัติเองนอกระบบ → นำเอกสารอนุมัติกลับมาแนบ + เลขที่เอกสาร + ชื่อผู้บริหาร แล้วกด "ขอดำเนินการใช้งบ" → งบเปิดใช้ทันที ไม่ผ่านผู้คุมงบยืนยัน (ผู้คุมงบยังเห็นงบและประวัติ ใส่ GL / ปรับงบได้ตามปกติ) · ผู้คุมงบไม่ต้องลง OPEX ให้'],
       ['ตั้งงบ', 'Business ยังขอตั้งงบใหม่เองได้ไหม', 'ได้ (ทางเดิม) สำหรับ CAPEX: ร่าง → พิมพ์แบบฟอร์มเข้าที่ประชุม → แนบมติ → ผู้คุมงบยืนยันเปิดใช้ — ทางนี้ไม่ต้องทำ Memo ขอดำเนินการใช้งบอีก เพราะผู้คุมงบตรวจมติแล้ว · OPEX ไม่ผ่านผู้คุมงบ (ดูแถวด้านบน)'],
