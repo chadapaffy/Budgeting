@@ -1100,3 +1100,4 @@ button.link { color: var(--brand); }
 /* ---- ช่องข้อมูลตามไฟล์ Governance (การจัดลำดับความสำคัญ) */
 .prio-set { margin-bottom: var(--s-4); }
 .prio-set textarea { min-height: 64px; }
+.lines-table .ln-worker { margin-top: var(--s-2); }

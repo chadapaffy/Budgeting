@@ -702,6 +702,13 @@
 
   // ---- CBS: Item หลัก (1, 2, 3) มีวงเงินของตัวเอง · Item ย่อย (1.1, 2.1) กำหนดวงเงินหรือไม่ก็ได้ (กันส่วนหนึ่งจาก Item หลัก ไม่เกินยอด Item หลัก)
   const parentOf = (b, it) => b.items.filter((x) => x !== it && String(it.code).startsWith(x.code + '.')).sort((x, y) => y.code.length - x.code.length)[0] || null;
+  /** รายการต้นทุน (หรือรายการแม่) / หมวดที่เป็นค่าแรง — ตอนขอเบิกใช้ใส่ชื่อคนงานได้ */
+  const LABOR_RE = /ค่าแรง|แรงงาน|labou?r|wage/i;
+  const isLaborText = (t) => LABOR_RE.test(String(t || ''));
+  function isLaborItem(b, it) {
+    for (let n = it; n; n = b.type === 'CBS' ? parentOf(b, n) : null) if (isLaborText(n.name)) return true;
+    return false;
+  }
   const isMainItem = (b, it) => b.type !== 'CBS' || depth(it) === 0;
   const hasOwnBudget = (b, it) => isMainItem(b, it) || itemTotal(it) > 0;
   const childrenOf = (b, it) => b.items.filter((x) => parentOf(b, x) === it);
@@ -3234,9 +3241,9 @@
     const lineRows = [];
     reqs.forEach((r) => { const b = budgetById(r.budgetId); r.lines.forEach((l, i) => { const it = itemById(b, l.itemId) || {};
       lineRows.push([r.no, r.docNo || '', b.code, i + 1, b.structure === 'project' ? '' : it.code || '', b.structure === 'project' ? '' : it.name || '', l.category || '', lineGl(b, l).code, lineGl(b, l).name,
-        lineInvestor(b, l), l.description || '', l.amountBeforeVat, l.vat, l.amount, STATUS_LABEL[r.status] || r.status]); }); });
+        lineInvestor(b, l), l.description || '', l.worker || '', l.amountBeforeVat, l.vat, l.amount, STATUS_LABEL[r.status] || r.status]); }); });
     add('lines', [S('เลขที่คำขอ', 15), S('เลขที่เอกสาร', 16), S('รหัสโครงการ'), { h: 'บรรทัด', w: 7, num: true }, S('รหัส Item', 16), S('ชื่อ Item', 26), S('หมวดค่าใช้จ่าย', 18), S('GL Code', 10), S('GL Name', 20),
-      S('บริษัทที่ลงทุน', 12), S('รายละเอียด', 34), N('ก่อน VAT'), N('VAT'), N('รวม'), S('สถานะ', 20)], lineRows);
+      S('บริษัทที่ลงทุน', 12), S('รายละเอียด', 34), S('ชื่อคนงาน', 18), N('ก่อน VAT'), N('VAT'), N('รวม'), S('สถานะ', 20)], lineRows);
 
     const cutRows = [];
     reqs.forEach((r) => { const b = budgetById(r.budgetId); (r.cuts || []).forEach((c) => cutRows.push([r.docNo || '', r.no, b.company, T(r.type), b.code, CUT_KIND[c.kind] || c.kind, day(c.date || c.at), c.amount,
@@ -3408,13 +3415,16 @@
 
   // ---------------------------------------------------------------- request form
 
+  /** ชื่อคนงานของบรรทัดค่าแรง (ถ้ามี) ใต้รายละเอียด */
+  const workerNote = (l) => (l.worker ? '<div class="muted">คนงาน: ' + esc(l.worker) + '</div>' : '');
+
   /** ตัวเลือกรายการ (เฉพาะรายการล่างสุด) พร้อมยอดคงเหลือ ไม่นับยอดที่คำขอนี้จองไว้เอง */
   function itemOptions(b, existing, selected, isCapex) {
     return sortedItems(b).filter((i) => b.type === 'CBS' || isLeaf(b, i)).map((i) => {
       const remaining = remainingFor(b, i.id, existing);
       const node = budgetNodeOf(b, i);
       const note = node !== i ? ' (ใช้วงเงิน Item ' + node.code + ')' : '';
-      return '<option value="' + i.id + '" data-remaining="' + remaining + '"' + (i.id === selected ? ' selected' : '') + '>' +
+      return '<option value="' + i.id + '" data-remaining="' + remaining + '"' + (isLaborItem(b, i) ? ' data-labor="1"' : '') + (i.id === selected ? ' selected' : '') + '>' +
         (b.type === 'CBS' ? '\u00a0\u00a0'.repeat(depth(i)) : '') + esc(i.code + ' ' + i.name) + ' — คงเหลือ ' + money(remaining) + ' บาท' + note + '</option>';
     }).join('');
   }
@@ -3431,7 +3441,8 @@
       (single ? '' : '<td><div class="select-wrap"><select name="lnItem" aria-label="' + (b.type === 'CAPEX' ? 'รายการย่อย (Item No.)' : 'รายการต้นทุน') + '"><option value="">— เลือก —</option>' +
         itemOptions(b, existing, line.itemId, false) + '</select></div></td>') +
       '<td><input name="lnDesc" value="' + esc(line.description || '') + '" aria-label="รายการ" placeholder="' +
-      (b.type === 'CAPEX' ? 'เช่น เครื่องชั่งดิจิตอล ละเอียด 1 mg' : 'เช่น ค่าแรงดูแลกล้า 3 วัน @349') + '"></td>' +
+      (b.type === 'CAPEX' ? 'เช่น เครื่องชั่งดิจิตอล ละเอียด 1 mg' : 'เช่น ค่าแรงดูแลกล้า 3 วัน @349') + '">' +
+      '<input name="lnWorker" class="ln-worker" value="' + esc(line.worker || '') + '" aria-label="ชื่อคนงาน" placeholder="ชื่อคนงาน / ผู้รับค่าแรง (ถ้ามี)"' + (line.worker ? '' : ' hidden') + '></td>' +
       '<td><input name="lnAmount" type="number" min="0" step="0.01" class="right" value="' + esc(line.amountBeforeVat || '') + '" aria-label="ก่อน VAT"></td>' +
       '<td class="center"><input name="lnVat" type="checkbox"' + (vat ? ' checked' : '') + ' aria-label="VAT 7%"></td>' +
       '<td class="num ln-total">0.00</td>' +
@@ -3451,8 +3462,13 @@
     // งบที่แยก Item (CAPEX / OPEX): เลือก Item ทีละบรรทัด ใบเดียวใช้ได้หลาย Item · งบรวมโครงการ: เลือกหมวดค่าใช้จ่ายแทน
     const perLine = !isProject;
     const single = !perLine;
-    const v = existing || { itemId: params.get('item') || (isProject ? b.items[0].id : ''), useType: 'prpo' };
-    const lines = existing ? existing.lines : [{ itemId: perLine ? params.get('item') || '' : '' }];
+    // ทำซ้ำรายการเบิก: คัดลอกคำขอเดิมของตนเอง (งบเดียวกัน) มาเป็นร่างฟอร์มใหม่ — ได้เลขที่คำขอใหม่เมื่อส่ง
+    const src = !existing && params.get('copy') ? requestById(params.get('copy')) : null;
+    const dup = src && src.budgetId === b.id && src.requesterId === u.id ? src : null;
+    const dupLines = dup ? dup.lines.map((l) => Object.assign({}, l, { itemId: perLine && !itemById(b, l.itemId) ? '' : l.itemId })) : null;
+    const v = existing || (dup ? { itemId: isProject ? b.items[0].id : '', useType: dup.useType || 'prpo', purpose: dup.purpose, payee: dup.payee, paymentPlan: dup.paymentPlan }
+      : { itemId: params.get('item') || (isProject ? b.items[0].id : ''), useType: 'prpo' });
+    const lines = existing ? existing.lines : dupLines && dupLines.length ? dupLines : [{ itemId: perLine ? params.get('item') || '' : '' }];
     const val = (k) => ' value="' + esc(v[k] == null ? '' : v[k]) + '"';
     const field = (label, inner, extra) => '<label class="field"' + (extra || '') + '><span>' + label + '</span>' + inner + '</label>';
     const lastReject = existing ? existing.steps.find((s) => s.status === 'rejected') : null;
@@ -3514,10 +3530,11 @@
     return '<div class="page-head"><div><h1>' + (existing ? 'แก้ไขคำขอ ' + esc(existing.no) : 'ขอเบิกใช้งบ') + '</h1>' +
       '<div class="page-sub">' + badge(b.type, TYPE_SHORT[b.type]) + ' ' + esc(b.code + ' ' + b.name) + '</div></div></div>' +
       (lastReject ? '<div class="alert error">เหตุผลที่ส่งกลับ: ' + esc(lastReject.comment) + '</div>' : '') +
+      (dup ? '<div class="alert info">ทำซ้ำจากคำขอ <strong>' + esc(dup.no) + '</strong> — เพิ่ม ลด หรือแก้รายการและจำนวนเงินได้ · ได้เลขที่คำขอใหม่เมื่อส่ง · ไม่คัดลอกไฟล์แนบและ Memo · <a href="#/request/new/' + b.id + '">เริ่มใหม่โดยไม่คัดลอก</a></div>' : '') +
       '<div id="formError"></div>' +
       '<form id="requestForm" class="req-form" data-budget="' + b.id + '" data-request="' + esc(requestId || '') + '" data-remaining="' + remaining + '">' +
       '<div class="detail-layout"><div class="detail-main form-main">' + general + linesCard +
-      '<div id="planWrap">' + planFieldset(existing && existing.paymentPlan, 4) + '</div>' +
+      '<div id="planWrap">' + planFieldset(existing ? existing.paymentPlan : dup && dup.paymentPlan, 4) + '</div>' +
       '</div><aside class="detail-side">' + side + '</aside></div></form>';
   }
 
@@ -3573,6 +3590,7 @@
         category: tr.querySelector('[name="lnCat"]') ? tr.querySelector('[name="lnCat"]').value : undefined,
         investor: tr.querySelector('[name="lnInv"]') ? tr.querySelector('[name="lnInv"]').value : undefined,
         description: tr.querySelector('[name="lnDesc"]').value.trim(),
+        worker: tr.querySelector('[name="lnWorker"]') && !tr.querySelector('[name="lnWorker"]').hidden ? tr.querySelector('[name="lnWorker"]').value.trim() : '',
         amountBeforeVat: before, vat, amount: round2(before + vat)
       };
     }).filter((l) => l.description || l.amountBeforeVat);
@@ -3661,11 +3679,14 @@
     form.addEventListener('change', syncParties);
     form.addEventListener('input', syncParties);
     const useType = () => (form.querySelector('[name="useType"]:checked') || {}).value;
+    /** ใส่ชื่อคนงานในบรรทัดค่าแรงแล้ว ไม่ต้องกรอกผู้รับเงินด้านบนอีก (ระบบใช้ชื่อคนงานเป็นผู้รับเงิน) */
+    const anyWorker = () => Array.from(form.querySelectorAll('#lineRows [name="lnWorker"]')).some((x) => !x.hidden && x.value.trim());
+    const payeeRequired = () => useType() !== 'prpo' && !anyWorker();
     const syncType = () => {
       const t = useType();
       const payee = { prpo: 'Supplier ที่จะสั่งซื้อ (ถ้าทราบ)', advance: 'ผู้รับเงินทดรอง', reimburse: 'พนักงานผู้สำรองจ่าย', direct: 'Supplier ผู้รับเงิน' }[t];
       document.getElementById('payeeLabel').textContent = payee || 'Supplier / ผู้รับเงิน';
-      f.payee.required = t !== 'prpo';
+      f.payee.required = payeeRequired();
       document.getElementById('planWrap').hidden = !(t === 'prpo' || t === 'direct');
     };
     form.querySelectorAll('[name="useType"]').forEach((el) => el.addEventListener('change', syncType));
@@ -3676,6 +3697,15 @@
       let sv = 0;
       Array.from(tbody.rows).forEach((tr, i) => {
         tr.querySelector('.line-no').textContent = i + 1;
+        // บรรทัดค่าแรง (รายการต้นทุน / หมวดที่เป็นค่าแรง) → แสดงช่องชื่อคนงาน
+        const w = tr.querySelector('[name="lnWorker"]');
+        if (w) {
+          const it = tr.querySelector('[name="lnItem"]');
+          const cat = tr.querySelector('[name="lnCat"]');
+          const labor = (it && it.selectedOptions[0] && it.selectedOptions[0].dataset.labor === '1') || (cat && isLaborText(cat.value)) ||
+            (!it && !cat && f.itemId && isLaborItem(b, itemById(b, f.itemId.value)));
+          w.hidden = !labor;
+        }
         const before = round2(tr.querySelector('[name="lnAmount"]').value);
         const vat = tr.querySelector('[name="lnVat"]').checked ? round2(before * VAT_RATE) : 0;
         tr.querySelector('.ln-total').textContent = money(before + vat);
@@ -3737,8 +3767,8 @@
         }
       });
     }
-    form.addEventListener('input', () => { update(); updatePlan(); });
-    form.addEventListener('change', () => { update(); updatePlan(); });
+    form.addEventListener('input', () => { update(); updatePlan(); f.payee.required = payeeRequired(); });
+    form.addEventListener('change', () => { update(); updatePlan(); f.payee.required = payeeRequired(); });
     updatePlan();
     document.getElementById('addLine').addEventListener('click', () => {
       tbody.insertAdjacentHTML('beforeend', document.getElementById('lineTpl').innerHTML);
@@ -3764,7 +3794,7 @@
       const lines = readLines(form, isCapex);
       const errors = [];
       if (!useType()) errors.push('กรุณาเลือกประเภทการเบิกใช้งบ');
-      if (f.payee.required && !f.payee.value.trim()) errors.push('กรุณาระบุผู้รับเงิน');
+      if (payeeRequired() && !f.payee.value.trim()) errors.push('กรุณาระบุผู้รับเงิน (หรือใส่ชื่อคนงานในบรรทัดค่าแรง)');
       if (!lines.length) errors.push('กรุณาใส่รายการที่ขอเบิกอย่างน้อย 1 บรรทัด');
       lines.forEach((l, i) => {
         const no = 'บรรทัดที่ ' + (Array.from(tbody.rows).indexOf(l.tr) + 1) + ': ';
@@ -3784,11 +3814,11 @@
 
       const now = new Date().toISOString();
       const clean = lines.map((l) => Object.assign({ itemId: l.itemId, description: l.description, amountBeforeVat: l.amountBeforeVat, vat: l.vat, amount: l.amount },
-        l.category !== undefined ? { category: l.category } : {}, l.investor !== undefined ? { investor: l.investor } : {}));
+        l.category !== undefined ? { category: l.category } : {}, l.investor !== undefined ? { investor: l.investor } : {}, l.worker ? { worker: l.worker } : {}));
       const fields = {
         itemId: isCapex ? f.itemId.value : (clean[0] || {}).itemId,
         lines: clean,
-        payee: f.payee.value.trim(),
+        payee: f.payee.value.trim() || uniq(clean.map((l) => l.worker).filter(Boolean)).join(', '),
         poNo: 'N/A',
         amountBeforeVat: round2(clean.reduce((s, l) => s + l.amountBeforeVat, 0)),
         vat: round2(clean.reduce((s, l) => s + l.vat, 0)),
@@ -3913,7 +3943,7 @@
           (withCat ? '<td>' + esc(l.category || '-') + '</td>' : withItem ? '<td>' + esc(it.code) + '<div class="muted">' + esc(it.name) + '</div></td>' : '') +
           (withGl ? '<td>' + esc(lineGl(b, l).code || '-') + '<div class="muted">' + esc(lineGl(b, l).code ? lineGl(b, l).name : 'รอบัญชีใส่ GL') + '</div></td>' : '') +
           '<td>' + investorCell(lineInvestor(b, l)) + '</td>' +
-          '<td>' + esc(l.description) + '</td><td class="num">' + money(l.amountBeforeVat) + '</td><td class="num">' + money(l.vat) +
+          '<td>' + esc(l.description) + workerNote(l) + '</td><td class="num">' + money(l.amountBeforeVat) + '</td><td class="num">' + money(l.vat) +
           '</td><td class="num">' + money(l.amount) + '</td></tr>';
       }).join('') + '</tbody><tfoot><tr><td colspan="' + (3 + (withCat || withItem ? 1 : 0) + (withGl ? 1 : 0)) + '" class="right"><strong>รวม</strong></td>' +
       '<td class="num">' + money(r.amountBeforeVat) + '</td><td class="num">' + money(r.vat) + '</td><td class="num"><strong>' + money(r.amount) + '</strong></td></tr></tfoot></table></div>';
@@ -4112,6 +4142,7 @@
     if (r.status === 'rejected' && isOwner) actions.push('<a class="btn primary" href="#/request/' + r.id + '/edit">แก้ไขและส่งใหม่</a>');
     if (r.status === 'memo' && isOwner) actions.push('<a class="btn" href="#/request/' + r.id + '/edit">แก้ไขคำขอ</a>');
     if (r.memo && r.memo.no) actions.push('<a class="btn' + (r.status === 'memo' ? ' primary' : '') + '" href="#/request/' + r.id + '/memo">พิมพ์ Memo ' + esc(r.memo.no) + '</a>');
+    if (isOwner && can('request.create') && b && isActive(b)) actions.push('<a class="btn" href="#/request/new/' + b.id + '?copy=' + r.id + '">ทำซ้ำรายการเบิก (Duplicate)</a>');
     if ((r.status === 'pending' || r.status === 'rejected' || r.status === 'memo') && isOwner) {
       actions.push('<button class="btn bad" id="cancelRequest" data-id="' + r.id + '">ยกเลิกคำขอ</button>');
     }
@@ -4698,7 +4729,7 @@
         const it = itemById(b, l.itemId) || {};
         return '<tr><td>' + (i + 1) + '</td>' +
           (withCat ? '<td>' + esc(l.category || '-') + '</td>' : isCapex ? (perItem ? '<td>' + esc(it.code + ' ' + it.name) + '</td>' : '') : '<td>' + esc(it.code + ' ' + it.name) + (lineGl(b, l).code ? '<br><small>GL ' + esc(lineGl(b, l).code + ' ' + (lineGl(b, l).name || '')) + '</small>' : '') + '</td>') +
-          '<td>' + esc(lineInvestor(b, l)) + '</td><td>' + esc(l.description) + '</td><td class="num">' + money(l.amountBeforeVat) + '</td><td class="num">' + money(l.vat) + '</td><td class="num">' + money(l.amount) + '</td></tr>';
+          '<td>' + esc(lineInvestor(b, l)) + '</td><td>' + esc(l.description) + workerNote(l) + '</td><td class="num">' + money(l.amountBeforeVat) + '</td><td class="num">' + money(l.vat) + '</td><td class="num">' + money(l.amount) + '</td></tr>';
       }).join('') +
       '<tr><th colspan="' + (isCapex && !withCat && !perItem ? 3 : 4) + '" class="right">รวมทั้งสิ้น</th><td class="num">' + money(r.amountBeforeVat) + '</td><td class="num">' + money(r.vat) +
       '</td><td class="num"><strong>' + money(r.amount) + '</strong></td></tr></tbody></table></div>';
@@ -5946,7 +5977,8 @@
         if (!f.querySelector('[name="useType"]:checked')) m.push('ประเภทการเบิกใช้งบ');
 
         if (!filled(e.purpose)) m.push('วัตถุประสงค์');
-        if (e.payee && e.payee.required && !filled(e.payee)) m.push('ผู้รับเงิน');
+        const hasWorker = Array.from(f.querySelectorAll('#lineRows [name="lnWorker"]')).some((x) => !x.hidden && x.value.trim());
+        if (e.payee && e.payee.required && !hasWorker && !filled(e.payee)) m.push('ผู้รับเงิน (หรือชื่อคนงานในบรรทัดค่าแรง)');
         const rows = Array.from(f.querySelectorAll('#lineRows tr')).map((tr) => ({
           desc: filled(tr.querySelector('[name="lnDesc"]')), amt: Number(tr.querySelector('[name="lnAmount"]').value || 0),
           item: tr.querySelector('[name="lnItem"]'), cat: tr.querySelector('[name="lnCat"]')
