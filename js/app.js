@@ -1074,7 +1074,7 @@
         state === 'open_review' && can('budget.verify') ? '<a class="btn small primary" href="#/budget/' + b.id + '">ตรวจ Memo</a>' : '',
         waitingOpen(b) && own && can('request.create') ? '<a class="btn small primary" href="#/budget/' + b.id + '">ขอดำเนินการใช้งบ</a>' : '',
         active && own && can('request.create') ? '<a class="btn small primary" href="#/request/new/' + b.id + '">เบิกใช้งบ</a>' : '',
-        active && can('budget.adjust') ? '<a class="btn small" href="#/adjust?budget=' + b.id + '">โยก / ลดงบ</a>' : ''
+        active && can('budget.adjust') ? '<a class="btn small" href="#/adjust?budget=' + b.id + '">ปรับปรุงงบ</a>' : ''
       ].join('');
       return '<tr' + (active ? '' : ' class="not-active"') + ' data-search="' + esc(search) + '" data-dept="' + esc(b.department) + '" data-year="' + esc(b.fiscalYear) + '" data-state="' + state +
         '" data-company="' + esc(b.company) + '" data-type="' + esc(b.type) +
@@ -1642,7 +1642,7 @@
     if (manageSub) actions.push('<a class="btn" href="#/budget/' + b.id + '/items">จัดการ Item ย่อย</a>');
     if (canEditGl(b)) actions.push('<a class="btn" href="#/budget/' + b.id + '/gl">ใส่ GL Code</a>');
     if (canPlanCashflow(b)) actions.push('<a class="btn" href="#/budget/' + b.id + '/cashflow">' + (hasCashflow(b) ? 'แก้ไข Plan Cashflow' : 'วาง Plan Cashflow') + '</a>');
-    if (active && can('budget.adjust')) actions.push('<a class="btn" href="#/adjust?budget=' + b.id + '">โยก / ลดงบ</a>');
+    if (active && can('budget.adjust')) actions.push('<a class="btn" href="#/adjust?budget=' + b.id + '">ปรับปรุงงบ</a>');
     if (editable || setupEdit) actions.push('<button type="button" class="btn bad" id="cancelBudget">' + (setupEdit ? 'ยกเลิกงบ' : 'ยกเลิกคำขอ') + '</button>');
     let html = '<div class="page-head detail-head"><div>' +
       '<div class="eyebrow">' + (isCapex ? 'งบลงทุน' : 'งบดำเนินงาน') + ' · ' + badge(b.type, TYPE_SHORT[b.type]) + ' ' + esc(b.code) +
@@ -5093,7 +5093,7 @@
     const from = params.get('budget') ? params.get('budget') + '|' + ((ledgerItems(budgetById(params.get('budget')) || { items: [], type: 'CAPEX' })[0] || {}).id || '') : '';
     const ctx = budgetById(params.get('budget') || params.get('to'));
     const recent = (db.log || []).filter((x) => /^(โยกงบ|ลดงบ)/.test(x.action) && (!ctx || x.ref.split(' → ').includes(ctx.code))).slice(-10).reverse();
-    return '<div class="page-head"><div><h1>โยก / ลดงบ' + (ctx ? ' · ' + esc(ctx.code) : '') + '</h1><div class="page-sub">' + (ctx ? esc(ctx.name) + ' — ' : '') +
+    return '<div class="page-head"><div><h1>ปรับปรุงงบ' + (ctx ? ' · ' + esc(ctx.code) : '') + '</h1><div class="page-sub">' + (ctx ? esc(ctx.name) + ' — ' : '') +
       'โยกข้ามรายการหรือข้ามโครงการได้ตามดุลพินิจของผู้คุมงบ ทุกครั้งต้องระบุเหตุผลและเก็บเป็นประวัติการปรับงบ</div></div></div>' + takeFlash() +
       '<div id="formError"></div><div class="form-main">' +
       '<section class="card form-section"><div class="section-head"><h2 class="section-title"><span class="step">1</span>โยกงบ</h2></div>' +
@@ -5737,7 +5737,7 @@
       budgets: can('budget.manage') ? 'จัดการงบประมาณ' : 'งบประมาณ', 'my-budgets': 'งบประมาณ',
       requests: 'รายการเบิกใช้งบ',
       tasks: 'งานทั้งหมด', approvals: 'งานทั้งหมด', accounting: 'งานทั้งหมด', payments: 'งานทั้งหมด', po: 'งานทั้งหมด', cuts: 'งานทั้งหมด',
-      history: 'ประวัติการทำรายการ', adjust: 'โยก / ลดงบ', log: 'Log การทำงาน', assumptions: 'สิ่งที่รอยืนยัน'
+      history: 'ประวัติการทำรายการ', adjust: 'ปรับปรุงงบ', log: 'Log การทำงาน', assumptions: 'สิ่งที่รอยืนยัน'
     };
     if (p[0] === 'change') {
       const c = changeById(p[1]);
