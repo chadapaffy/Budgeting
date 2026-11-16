@@ -1051,7 +1051,7 @@
     const actions = can('budget.create') && mine
       ? '<a class="btn primary tall" href="#/budget/new"><span aria-hidden="true">+</span> ขออนุมัติงบใหม่</a>'
       : can('budget.manage') && !mine
-        ? '<a class="btn primary tall" href="#/budget/new"><span aria-hidden="true">+</span> ลงงบประจำปี</a><a class="btn tall" href="#/budget/import">Import Excel</a>'
+        ? '<a class="btn primary tall" href="#/budget/new"><span aria-hidden="true">+</span> สร้างงบประมาณ</a><a class="btn tall" href="#/budget/import">Import งบ</a>'
         : '';
     let html = '<div class="page-head"><h1>งบประมาณ</h1>' + (actions ? '<div class="head-actions">' + actions + '</div>' : '') + '</div>' + takeFlash();
 
