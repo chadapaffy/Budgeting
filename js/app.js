@@ -1257,7 +1257,7 @@
     return null;
   }
 
-  function viewBudgetForm(id) {
+  function viewBudgetForm(id, params) {
     const b = id ? budgetById(id) : null;
     if (id && !b) return notFound();
     const mode = budgetFormMode(b);
@@ -1267,10 +1267,21 @@
     }
     const u = me();
     const year = new Date().getFullYear();
-    const v = b || {
+    // คัดลอกจากโครงการ OPEX ก่อนหน้า (Business เจ้าของงบ ตอนสร้างงบใหม่เท่านั้น)
+    const copyList = !b && mode === 'draft'
+      ? db.budgets.filter((x) => x.type === 'CBS' && x.ownerId === u.id && x.state !== 'cancelled').sort((x, y) => String(y.createdAt || '').localeCompare(String(x.createdAt || '')))
+      : [];
+    const copyId = params && params.get ? params.get('copy') : '';
+    const copySrc = copyList.find((x) => x.id === copyId) || null;
+    const v = b || (copySrc ? {
+      type: 'CBS', structure: 'items', company: copySrc.company, fiscalYear: copySrc.fiscalYear, group: copySrc.group || '', code: '', parentCode: '', name: copySrc.name,
+      department: copySrc.department || '', ownerId: u.id, note: copySrc.note || '', status: 'Plan', startDate: '', endDate: '', production: {},
+      // คัดลอกเฉพาะ Item หลัก (รหัส ชื่อ วงเงิน VAT GL) — Item ย่อยและข้อมูลการอนุมัติไม่ติดไป
+      items: copySrc.items.filter((it) => depth(it) === 0).map((it) => ({ code: it.code, name: it.name, qty: '', unit: '', amount: it.amount, vat: it.vat || 0, glCode: it.glCode || '', glName: it.glName || '' }))
+    } : {
       type: 'CAPEX', structure: 'items', company: (db.master.companies[0] || {}).code || '', fiscalYear: year + 1, group: '', code: '', parentCode: '', name: '',
       department: '', ownerId: mode === 'setup' ? '' : u.id, note: '', status: 'Plan', startDate: '', endDate: '', production: {}, items: []
-    };
+    });
     const structure = v.structure || 'items';
     const projItem = structure === 'project' && v.items[0] ? v.items[0] : {};
     const requesters = USERS.filter(canRequestUser);
@@ -1289,7 +1300,17 @@
         : 'บันทึกเป็นร่างก่อน → พิมพ์แบบฟอร์มเข้าที่ประชุม → เมื่อที่ประชุมอนุมัติ แนบมติแล้วส่งให้ผู้คุมงบยืนยันเปิดใช้ (ถ้าที่ประชุมอนุมัติไม่เต็มจำนวน ให้แก้ตัวเลขในร่างก่อนส่ง)');
 
     const intro = introFor(v.type);
+    const copyBar = copyList.length
+      ? '<section class="card copy-card"><div class="copy-row"><label class="field"><span>คัดลอกจากโครงการ OPEX ก่อนหน้า</span><div class="select-wrap"><select id="copyFrom" aria-label="โครงการ OPEX ที่จะคัดลอก">' +
+        '<option value="">— เลือกโครงการ —</option>' + copyList.map((x) => opt(x.id, x.code + ' · ' + x.name + ' · ปี ' + x.fiscalYear, copySrc ? copySrc.id : '')).join('') + '</select></div></label>' +
+        '<button type="button" class="btn" id="copyBtn" disabled>คัดลอก</button></div>' +
+        '<p class="muted small-note">ใช้โครงการเดิมเป็นต้นแบบ: ดึงบริษัท หน่วยงาน กลุ่มงบ ชื่อ และ Item หลักพร้อมวงเงิน / VAT / GL มาใส่ฟอร์มให้ แล้วแก้ได้ — รหัสโครงการต้องกรอกใหม่ · Item ย่อยและข้อมูลการอนุมัติไม่ถูกคัดลอก</p></section>'
+      : '';
+    const copyNote = copySrc
+      ? '<div class="alert info">คัดลอกจาก <strong>' + esc(copySrc.code) + '</strong> ' + esc(copySrc.name) + ' แล้ว — กรอกรหัสโครงการใหม่ และปรับชื่อ / วงเงินตามโครงการนี้ได้ · <a href="#/budget/new">เริ่มใหม่โดยไม่คัดลอก</a></div>'
+      : '';
     return '<div class="page-head"><div><h1>' + title + '</h1><div class="page-sub" id="budgetIntro" data-capex="' + esc(introFor('CAPEX')) + '" data-cbs="' + esc(introFor('CBS')) + '">' + intro + '</div></div></div>' +
+      copyBar + copyNote +
       '<div id="formError"></div>' +
       '<form id="budgetForm" class="card" data-id="' + esc(id || '') + '" data-mode="' + mode + '">' +
       '<datalist id="glList">' + db.master.glCodes.map((g) => '<option value="' + esc(g.code) + '">' + esc(g.name) + '</option>').join('') + '</datalist>' +
@@ -1349,6 +1370,17 @@
   function bindBudgetForm() {
     const form = document.getElementById('budgetForm');
     if (!form) return;
+    const copyBtn = document.getElementById('copyBtn');
+    if (copyBtn) {
+      const copySel = document.getElementById('copyFrom');
+      copyBtn.disabled = !copySel.value;
+      copySel.addEventListener('change', () => { copyBtn.disabled = !copySel.value; });
+      copyBtn.addEventListener('click', () => {
+        if (!copySel.value) return;
+        if (form.elements.code.value.trim() && !confirm('ข้อมูลที่กรอกไว้ในฟอร์มนี้จะถูกแทนที่ด้วยข้อมูลที่คัดลอก ต้องการดำเนินการต่อ?')) return;
+        go('#/budget/new?copy=' + copySel.value);
+      });
+    }
     const typeSel = form.elements.type;
     const curType = () => typeSel.value;
 
@@ -1635,6 +1667,7 @@
       actions.push('<a class="btn" href="#/change/new/' + b.id + '">ขอเพิ่มงบ</a>');
     }
     if (editable) actions.push('<a class="btn" href="#/budget/' + b.id + '/edit">แก้ไขร่าง</a>');
+    if (b.type === 'CBS' && own && can('budget.create') && state !== 'cancelled') actions.push('<a class="btn" href="#/budget/new?copy=' + b.id + '">คัดลอกเป็นโครงการใหม่</a>');
     const setupEdit = b.setup && waitingOpen(b) && can('budget.manage');
     if (setupEdit) actions.push('<a class="btn" href="#/budget/' + b.id + '/edit">แก้ไขงบ</a>');
     if (b.setup && b.openMemo && b.type === 'CAPEX' && (own || canViewAll())) actions.push('<a class="btn" href="#/budget/' + b.id + '/memo' + (canEditOpenMemo(b) ? '' : '?view=1') + '">Memo ขอดำเนินการใช้งบ</a>');
@@ -5427,6 +5460,7 @@
       ['ใช้งบ', 'หมวดค่าใช้จ่าย', 'ใช้กับงบรวมโครงการ · แก้รายการหมวดได้ที่ข้อมูลหลัก'],
       ['OPEX', 'Item ของงบ OPEX', 'ต้องมี Item เสมอ (ไม่มีงบรวมทั้งโครงการ) · Item หลัก (1, 2, 3) กำหนดตอนตั้งงบพร้อมวงเงิน ไม่มีจำนวน/หน่วย · Item ย่อยได้ 3 ระดับ (1 → 1.1 → 1.1.1) เพิ่มได้เรื่อย ๆ หลังงบเปิดใช้แล้ว · รหัสโครงการและรหัส Item ผู้สร้างงบตั้งเอง โดย Business เจ้าของงบหรือผู้คุมงบ (ไม่ต้องอนุมัติซ้ำ ยอดงบรวมไม่เปลี่ยน)'],
       ['OPEX', 'วงเงินของ Item ย่อย', 'เงื่อนไขเดียว: รวมกันต้องไม่เกินวงเงิน Item หลัก (ถ้า 1.1 กำหนดวงเงินไว้ 1.1.x ต้องรวมไม่เกิน 1.1 ด้วย เพื่อให้ยอดคงเหลือสอดคล้องกัน) · จะกำหนดหรือไม่กำหนดวงเงินของ Item ย่อยก็ได้ (ไม่กำหนด = ใช้วงเงินของ Item แม่) · จำนวน/หน่วย กรอกที่ Item ย่อย · Item ย่อยที่กำหนดวงเงินถูกตรวจทั้งวงเงินตัวเองและวงเงิน Item หลัก · Item ย่อยที่มีการขอใช้แล้ว แก้รหัส/ลบไม่ได้'],
+      ['OPEX', 'คัดลอกจากโครงการก่อนหน้า', 'Business ที่สร้างงบ OPEX ใหม่เลือกโครงการ OPEX ของตนเองเป็นต้นแบบได้ (ปุ่ม "คัดลอก" บนฟอร์ม หรือ "คัดลอกเป็นโครงการใหม่" ในหน้างบ): ดึงบริษัท หน่วยงาน กลุ่มงบ ชื่อ หมายเหตุ ปีงบ และ Item หลักพร้อมวงเงิน / VAT / GL · รหัสโครงการกรอกใหม่ · ไม่คัดลอก Item ย่อย / เอกสารอนุมัติ / ไฟล์แนบ · ใช้ยอดปัจจุบันของโครงการเดิม (รวมที่ปรับแล้ว)'],
       ['OPEX', 'ขั้นตอนการใช้งบ OPEX', 'เหมือน CAPEX ทุกขั้น: ขอเบิกใช้งบ (4 ประเภท) → ผู้คุมงบตรวจสอบ → ตัดงบตามประเภท → ปิดยอดคืนส่วนต่าง · ขอเกินงบรายการต้องมี Note · ไม่ใช้ Memo'],
       ['OPEX', 'การอนุมัติงบ OPEX (ตั้งงบ / เพิ่มงบ)', 'ไม่เข้าบอร์ด — ให้ผู้บริหารอนุมัติ: แนบเอกสารอนุมัติ + เลขที่เอกสาร + ชื่อผู้บริหารที่อนุมัติ แล้วผู้คุมงบตรวจสอบและยืนยัน (ต้นแบบนี้ผู้บริหารอนุมัตินอกระบบ แล้วแนบหลักฐาน)'],
       ['OPEX', 'ผู้บริหารที่อนุมัติ ต้องเป็นผู้ใช้ในระบบไหม', 'ไม่ — พิมพ์ชื่อ/ตำแหน่งและแนบหลักฐาน (ถ้าต้องการให้ผู้บริหารกดอนุมัติในระบบ จะเพิ่มบทบาท "ผู้บริหาร" ภายหลัง)'],
@@ -5781,7 +5815,7 @@
     else if (parts[0] === 'master') html = viewMaster(parts[1]);
     else if (parts[0] === 'admin') html = viewAdmin(params);
     else if (parts[0] === 'budgets' || parts[0] === 'my-budgets') html = viewBudgets(params, parts[0] === 'my-budgets');
-    else if (parts[0] === 'budget' && parts[1] === 'new') html = viewBudgetForm(null);
+    else if (parts[0] === 'budget' && parts[1] === 'new') html = viewBudgetForm(null, params);
     else if (parts[0] === 'budget' && parts[1] === 'import') html = viewImport();
     else if (parts[0] === 'budget' && parts[2] === 'memo') html = viewOpenMemo(parts[1], params);
     else if (parts[0] === 'budget' && parts[2] === 'edit') html = viewBudgetForm(parts[1]);
