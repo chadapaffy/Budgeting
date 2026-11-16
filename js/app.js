@@ -1373,7 +1373,7 @@
 
       '<fieldset><legend>โครงสร้างงบ</legend><div class="choice">' +
       radio('items', dual('แยกรายการย่อย', 'แยก Item'), 'คุมวงเงินรายรายการ เหมาะกับงบที่รู้รายละเอียดแล้ว') +
-      radio('project', 'งบรวมทั้งโครงการ', 'ยังไม่แยกรายการ — ตอนใช้งบเลือกหมวดค่าใช้จ่ายแทน คุมวงเงินที่ระดับโครงการ') + '</div>' +
+      radio('project', 'งบรวมทั้งโครงการ', 'ยังไม่แยกรายการ — ตอนใช้งบพิมพ์ชื่อรายการเอง คุมวงเงินที่ระดับโครงการ') + '</div>' +
       '<div class="row" data-structure="project">' +
       field('วงเงินรวมทั้งโครงการ (รวม VAT)', '<input name="projAmount" type="number" min="0" step="0.01" class="right" value="' + esc(projItem.amount || '') + '">') +
       field('ประเภทสินทรัพย์หลัก', select('projAsset', optList(db.master.assetTypes, 'name', (t) => t.name, projItem.assetType || assetTypeList()[0])), ' data-for="CAPEX"') +
@@ -1777,8 +1777,8 @@
         '<td class="num">' + money(budgetTotal(b)) + '</td>' +
         (active ? '<td class="num">' + money(us.used) + '</td><td class="num">' + money(us.reserved) + '</td><td class="num"><strong>' + moneyCell(us.remaining) + '</strong></td>' : '') +
         '</tr></tbody></table></div>' +
-        (active ? '<h2>สรุปการใช้งบตามหมวดค่าใช้จ่าย</h2>' + (Object.keys(cats).length
-          ? '<div class="table-wrap"><table><thead><tr><th>หมวดค่าใช้จ่าย</th><th class="num">ยอดที่ขอใช้ (ไม่รวมที่ยกเลิก/ส่งกลับ)</th></tr></thead><tbody>' +
+        (active ? '<h2>สรุปการใช้งบตามรายการ</h2>' + (Object.keys(cats).length
+          ? '<div class="table-wrap"><table><thead><tr><th>รายการ</th><th class="num">ยอดที่ขอใช้ (ไม่รวมที่ยกเลิก/ส่งกลับ)</th></tr></thead><tbody>' +
             Object.keys(cats).sort((x, y) => cats[y] - cats[x]).map((k) => '<tr><td>' + esc(k) + '</td><td class="num">' + money(cats[k]) + '</td></tr>').join('') + '</tbody></table></div>'
           : '<p class="muted">ยังไม่มีการเบิกใช้งบ</p>') : '');
     } else if (isCapex) {
@@ -3253,7 +3253,7 @@
     reqs.forEach((r) => { const b = budgetById(r.budgetId); r.lines.forEach((l, i) => { const it = itemById(b, l.itemId) || {};
       lineRows.push([r.no, r.docNo || '', b.code, i + 1, b.structure === 'project' ? '' : it.code || '', b.structure === 'project' ? '' : it.name || '', l.category || '', lineGl(b, l).code, lineGl(b, l).name,
         lineInvestor(b, l), l.description || '', l.supplier || '', l.purpose || '', l.amountBeforeVat, l.vat, l.amount, STATUS_LABEL[r.status] || r.status]); }); });
-    add('lines', [S('เลขที่คำขอ', 15), S('เลขที่เอกสาร', 16), S('รหัสโครงการ'), { h: 'บรรทัด', w: 7, num: true }, S('รหัส Item', 16), S('ชื่อ Item', 26), S('หมวดค่าใช้จ่าย', 18), S('GL Code', 10), S('GL Name', 20),
+    add('lines', [S('เลขที่คำขอ', 15), S('เลขที่เอกสาร', 16), S('รหัสโครงการ'), { h: 'บรรทัด', w: 7, num: true }, S('รหัส Item', 16), S('ชื่อ Item', 26), S('รายการ (งบรวมโครงการ)', 22), S('GL Code', 10), S('GL Name', 20),
       S('บริษัทที่ลงทุน', 12), S('รายละเอียด', 34), S('Supplier', 22), S('วัตถุประสงค์', 30), N('ก่อน VAT'), N('VAT'), N('รวม'), S('สถานะ', 20)], lineRows);
 
     const cutRows = [];
@@ -3480,8 +3480,7 @@
   function itemGroup(b, existing, key, rows) {
     const capex = b.type === 'CAPEX';
     const pick = b.structure === 'project'
-      ? '<div class="group-pick"><div class="select-wrap"><select name="lnCat" aria-label="หมวดค่าใช้จ่าย"><option value="">— เลือกหมวดค่าใช้จ่าย —</option>' +
-        optList(db.master.expenseCategories, 'name', (c) => c.name, key.category || '') + '</select></div>' +
+      ? '<div class="group-pick"><input name="lnCat" class="group-title" value="' + esc(key.category || '') + '" aria-label="ชื่อรายการ" placeholder="พิมพ์ชื่อรายการ เช่น งานติดตั้งระบบไฟ" autocomplete="off">' +
         (capex ? '<label class="group-inv"><span>บริษัทที่ลงทุน</span>' + investorSelect('lnInv', key.investor || b.company) + '</label>' : '') + '</div>'
       : '<div class="select-wrap"><select name="lnItem" aria-label="' + (capex ? 'รายการย่อย (Item No.)' : 'รายการต้นทุน (Item)') + '"><option value="">— เลือก Item —</option>' +
         itemOptions(b, existing, key.itemId || '', false) + '</select></div>';
@@ -3559,7 +3558,7 @@
         field('วันที่ส่งมอบ/วางบิล', '<input type="date" name="deliveryDate" required value="' + esc((existing && existing.deliveryDate) || today) + '">') +
         field('วันที่กำหนดจ่ายเงิน', '<input type="date" name="payDueDate" required value="' + esc((existing && existing.payDueDate) || today) + '">') + '</div>' +
       (isProject ? '<input type="hidden" name="itemId" value="' + esc(b.items[0].id) + '" data-remaining="' + projRemain + '">' +
-        '<p class="group-note">งบรวมทั้งโครงการ ' + esc(b.code) + ' — คงเหลือ <strong>' + money(projRemain) + '</strong> บาท · แต่ละกลุ่มเลือกหมวดค่าใช้จ่าย' + (opex ? '' : ' และบริษัทที่ลงทุน') + '</p>' : '') +
+        '<p class="group-note">งบรวมทั้งโครงการ ' + esc(b.code) + ' — คงเหลือ <strong>' + money(projRemain) + '</strong> บาท · แต่ละกลุ่มพิมพ์ชื่อรายการ' + (opex ? '' : ' และเลือกบริษัทที่ลงทุน') + '</p>' : '') +
       '<div class="groups-box"><div id="itemGroups">' + groupLines(b, oldPurpose(lines)).map((g) => itemGroup(b, existing, g.key, g.rows)).join('') + '</div>' +
       '<div class="table-wrap group-sum"><table class="edit-table group-table">' + GROUP_COLS +
       '<tbody><tr><td colspan="3" class="right"><strong>รวม</strong></td><td class="num"><strong id="sumBefore">0.00</strong></td><td class="num"><strong id="sumVat">0.00</strong></td><td class="num"><strong id="sumTotal">0.00</strong></td><td></td></tr></tbody></table></div></div>' +
@@ -3584,8 +3583,8 @@
         (existing && existing.memo && existing.memo.no ? '<br>Memo เดิมเลขที่ ' + esc(existing.memo.no) + ' — แก้ไขแล้วต้องให้ผู้บริหารเซ็นใหม่' : '') + '</p></div>' : '</div>') +
       '<div class="card form-tip"><h3 class="side-title">คำแนะนำในการเบิก</h3><p class="tip-head">กรณีขอเกินงบประมาณ</p><p class="muted">ขอเกินงบรายการได้ โดยผู้คุมงบต้องใส่ Note · หากยอดเกินงบรวมโครงการ ผู้คุมงบจะพิจารณาโยกงบให้ หรือให้ขอเพิ่มงบ</p>' +
         '<p class="tip-head">หลาย Supplier ในรายการเดียว</p><p class="muted">กด "+ เพิ่ม Supplier" ใต้รายการ' + (opex ? ' เช่น ค่าแรงคนงานหลายคน' : '') + ' · Supplier ใหม่เลือก "+ เพิ่มชื่อใหม่…" ในช่อง Supplier</p>' +
-        (isProject ? '<p class="tip-head">งบรวมทั้งโครงการ</p><p class="muted">ไม่มี Item ให้เลือก — แต่ละกลุ่มเลือกหมวดค่าใช้จ่าย' +
-          (opex ? ' (GL ตามหมวดค่าใช้จ่ายในข้อมูลหลัก)' : ' และบริษัทที่ลงทุน (ใช้เงินข้ามบริษัทกับ PCC ต้องทำ Memo ให้ผู้บริหารเซ็นก่อนส่ง)') + '</p>' : '') + '</div>';
+        (isProject ? '<p class="tip-head">งบรวมทั้งโครงการ</p><p class="muted">ไม่มี Item ให้เลือก — แต่ละกลุ่มพิมพ์ชื่อรายการเอง' +
+          (opex ? '' : ' และเลือกบริษัทที่ลงทุน (ใช้เงินข้ามบริษัทกับ PCC ต้องทำ Memo ให้ผู้บริหารเซ็นก่อนส่ง)') + '</p>' : '') + '</div>';
 
     return '<div class="page-head"><div><h1>' + (existing ? 'แก้ไขคำขอ ' + esc(existing.no) : 'ขอเบิกใช้งบ') + '</h1>' +
       '<div class="page-sub">' + badge(b.type, TYPE_SHORT[b.type]) + ' ' + esc(b.code + ' ' + b.name) + '</div></div>' +
@@ -3658,7 +3657,7 @@
       return {
         tr,
         itemId: isCapex ? form.elements.itemId.value : (rowItemSel(tr) || {}).value || '',
-        category: rowField(tr, 'lnCat') ? rowField(tr, 'lnCat').value : undefined,
+        category: rowField(tr, 'lnCat') ? rowField(tr, 'lnCat').value.trim() : undefined,
         investor: rowField(tr, 'lnInv') ? rowField(tr, 'lnInv').value : undefined,
         description: tr.querySelector('[name="lnDesc"]').value.trim(),
         supplier: rowSupplier(tr),
@@ -3902,7 +3901,7 @@
       lines.forEach((l, i) => {
         const no = 'บรรทัดที่ ' + (lineTrs(form).indexOf(l.tr) + 1) + ': ';
         if (perLine && !l.itemId) errors.push(no + (b.type === 'CAPEX' ? 'กรุณาเลือกรายการย่อย (Item No.)' : 'กรุณาเลือกรายการต้นทุน'));
-        if (l.category === '') errors.push(no + 'กรุณาเลือกหมวดค่าใช้จ่าย');
+        if (l.category === '') errors.push(no + 'กรุณาพิมพ์ชื่อรายการ');
         if (!l.description) errors.push(no + 'กรุณาระบุรายการ');
         if (!(l.amountBeforeVat > 0)) errors.push(no + 'จำนวนเงินต้องมากกว่า 0');
         if (l.supplier !== undefined && useType() !== 'prpo' && !l.supplier) errors.push(no + 'กรุณาระบุ Supplier');
@@ -4044,7 +4043,7 @@
     const withSup = r.lines.some((l) => l.supplier);
     const withItem = !withCat && b.structure !== 'project';
     return '<div class="table-wrap"><table><thead><tr><th style="width:2.5rem">#</th>' +
-      (withCat ? '<th>หมวดค่าใช้จ่าย</th>' : withItem ? '<th>' + (isCapex ? 'รายการย่อย (Item No.)' : 'รายการต้นทุน') + '</th>' : '') + (withGl ? '<th>GL</th>' : '') +
+      (withCat ? '<th>รายการ</th>' : withItem ? '<th>' + (isCapex ? 'รายการย่อย (Item No.)' : 'รายการต้นทุน') + '</th>' : '') + (withGl ? '<th>GL</th>' : '') +
       '<th>บริษัทที่ลงทุน</th>' + (withSup ? '<th>Supplier</th>' : '') + '<th>' + (isCapex ? 'รายการที่ซื้อ / จ่าย' : 'รายละเอียด') + '</th><th class="num">ก่อน VAT</th><th class="num">VAT 7%</th><th class="num">รวม</th></tr></thead><tbody>' +
       r.lines.map((l, i) => {
         const it = itemById(b, l.itemId) || {};
@@ -4839,7 +4838,7 @@
     const withCat = isCapex && r.lines.some((l) => l.category);
     const withSup = r.lines.some((l) => l.supplier);
     const lines = '<div class="section"><h2>รายการที่ขอใช้ครั้งนี้</h2><table><thead><tr><th style="width:2rem">#</th>' +
-      (withCat ? '<th>หมวดค่าใช้จ่าย</th>' : isCapex ? (perItem ? '<th>รายการย่อย (Item No.)</th>' : '') : '<th>รายการต้นทุน / GL</th>') + '<th>บริษัทที่ลงทุน</th>' + (withSup ? '<th>Supplier</th>' : '') + '<th>' + (isCapex ? 'รายการที่ซื้อ / จ่าย' : 'รายละเอียด') + '</th>' +
+      (withCat ? '<th>รายการ</th>' : isCapex ? (perItem ? '<th>รายการย่อย (Item No.)</th>' : '') : '<th>รายการต้นทุน / GL</th>') + '<th>บริษัทที่ลงทุน</th>' + (withSup ? '<th>Supplier</th>' : '') + '<th>' + (isCapex ? 'รายการที่ซื้อ / จ่าย' : 'รายละเอียด') + '</th>' +
       '<th class="num">ก่อน VAT</th><th class="num">VAT 7%</th><th class="num">รวม</th></tr></thead><tbody>' +
       r.lines.map((l, i) => {
         const it = itemById(b, l.itemId) || {};
@@ -5106,7 +5105,7 @@
       cols: [{ k: 'name', label: 'ประเภทสินทรัพย์' }],
       inUse: (it) => db.budgets.some((b) => b.type === 'CAPEX' && b.items.some((i) => i.assetType === it.name)),
       rename: (from, to) => db.budgets.forEach((b) => b.items.forEach((i) => { if (b.type === 'CAPEX' && i.assetType === from) i.assetType = to; })) },
-    { key: 'expenseCategories', title: 'หมวดค่าใช้จ่าย', hint: 'ตัวเลือกหมวดค่าใช้จ่ายของแต่ละบรรทัด เมื่อขอเบิกใช้งบของงบที่ไม่มี Item (งบรวมโครงการ)', lock: false,
+    { key: 'expenseCategories', title: 'หมวดค่าใช้จ่าย', hint: 'GL ตั้งต้นของงบรวมโครงการ OPEX — ถ้าชื่อรายการที่ Business พิมพ์ตรงกับหมวดในนี้ ระบบใส่ GL ให้ (ตอนขอเบิกไม่ต้องเลือกหมวดแล้ว)', lock: false,
       cols: [{ k: 'name', label: 'หมวดค่าใช้จ่าย' }, { k: 'gl', label: 'GL Code (ถ้ามี)', w: '12rem' }],
       inUse: (it) => db.requests.some((r) => r.lines.some((l) => l.category === it.name)),
       rename: (from, to) => db.requests.forEach((r) => r.lines.forEach((l) => { if (l.category === from) l.category = to; })) },
@@ -5957,7 +5956,7 @@
       ['ใช้งบ', 'ใครเลือกว่าทำ Memo', 'ผู้ขอเลือกเองด้วยปุ่ม "ทำ Memo" ข้างปุ่มส่ง · ถ้าเกณฑ์ของบริษัทบังคับ (ตั้งต้น: งบที่ไม่มี Item) จะมีแค่ปุ่มทำ Memo'],
       ['ใช้งบ', 'ขั้นตอน Memo', 'บันทึกคำขอ → ระบบออกเลขที่ Memo (MEMO-บริษัทปี-ลำดับ) และจองงบไว้ → ผู้ขอพิมพ์ไปให้ผู้บริหารเซ็น → แนบไฟล์ที่เซ็นแล้ว + ชื่อผู้บริหาร → ส่งให้ผู้คุมงบ · แก้ไขคำขอระหว่างรอได้ (ต้องเซ็นใหม่ ใช้เลขที่เดิม)'],
       ['ใช้งบ', 'บริษัทที่ลงทุน', 'ไม่มีการใช้งบข้ามบริษัทราย Item แล้ว — ทุก Item ใช้งบของบริษัทเจ้าของงบ (ไม่มีช่อง "บริษัทที่ลงทุน" ใน Item) · งบที่ไม่มี Item (งบรวมทั้งโครงการ) ยังเลือกบริษัทที่ลงทุนรายบรรทัดตอนเบิกใช้งบได้ (ค่าตั้งต้น = บริษัทเจ้าของงบ) · แสดงในใบเบิกใช้งบและ Memo'],
-      ['ใช้งบ', 'หมวดค่าใช้จ่าย', 'ใช้กับงบรวมโครงการ · แก้รายการหมวดได้ที่ข้อมูลหลัก'],
+      ['ใช้งบ', 'รายการของงบรวมโครงการ', 'งบที่ไม่มี Item (CAPEX / OPEX) ตอนขอเบิกพิมพ์ชื่อรายการเอง ไม่ต้องเลือกหมวด · ถ้าชื่อตรงกับหมวดค่าใช้จ่ายในข้อมูลหลัก OPEX จะได้ GL ตั้งต้นของหมวดนั้น'],
       ['OPEX', 'Item ของงบ OPEX', 'ต้องมี Item เสมอ (ไม่มีงบรวมทั้งโครงการ) · Item หลัก (1, 2, 3) กำหนดตอนตั้งงบพร้อมวงเงิน ไม่มีจำนวน/หน่วย · Item ย่อยได้ 3 ระดับ (1 → 1.1 → 1.1.1) เพิ่มได้เรื่อย ๆ หลังงบเปิดใช้แล้ว · รหัสโครงการและรหัส Item ผู้สร้างงบตั้งเอง โดย Business เจ้าของงบหรือผู้คุมงบ (ไม่ต้องอนุมัติซ้ำ ยอดงบรวมไม่เปลี่ยน)'],
       ['OPEX', 'วงเงินของ Item ย่อย', 'เงื่อนไขเดียว: รวมกันต้องไม่เกินวงเงิน Item หลัก (ถ้า 1.1 กำหนดวงเงินไว้ 1.1.x ต้องรวมไม่เกิน 1.1 ด้วย เพื่อให้ยอดคงเหลือสอดคล้องกัน) · จะกำหนดหรือไม่กำหนดวงเงินของ Item ย่อยก็ได้ (ไม่กำหนด = ใช้วงเงินของ Item แม่) · จำนวน/หน่วย กรอกที่ Item ย่อย · Item ย่อยที่กำหนดวงเงินถูกตรวจทั้งวงเงินตัวเองและวงเงิน Item หลัก · Item ย่อยที่มีการขอใช้แล้ว แก้รหัส/ลบไม่ได้'],
       ['OPEX', 'คัดลอกจากโครงการก่อนหน้า', 'Business ที่สร้างงบ OPEX ใหม่เลือกโครงการ OPEX ของตนเองเป็นต้นแบบได้ (ปุ่ม "คัดลอก" บนฟอร์ม หรือ "คัดลอกเป็นโครงการใหม่" ในหน้างบ): ดึงบริษัท หน่วยงาน กลุ่มงบ ชื่อ หมายเหตุ ปีงบ และ Item หลักพร้อมวงเงิน / VAT / GL · รหัสโครงการกรอกใหม่ · ไม่คัดลอก Item ย่อย / เอกสารอนุมัติ / ไฟล์แนบ · ใช้ยอดปัจจุบันของโครงการเดิม (รวมที่ปรับแล้ว)'],
@@ -6110,7 +6109,7 @@
         if (used.some((r) => !(r.amt > 0))) m.push('จำนวนเงินทุกบรรทัด');
         const rb = budgetById(f.dataset.budget) || {};
         if ((used.length ? used : rows).some((r) => r.item && !r.item.value)) m.push(rb.type === 'CAPEX' ? 'รายการย่อย (Item No.) ทุกบรรทัด' : 'รายการต้นทุนทุกบรรทัด');
-        if (used.some((r) => r.cat && !r.cat.value)) m.push('หมวดค่าใช้จ่ายทุกบรรทัด');
+        if (used.some((r) => r.cat && !filled(r.cat))) m.push('ชื่อรายการทุกกลุ่ม');
         if (used.some((r) => r.purp && !filled(r.purp))) m.push('วัตถุประสงค์ทุกรายการ');
         if (used.some((r) => r.sup && (!filled(r.sup) || r.sup.value === SUP_NEW)) && (f.querySelector('[name="useType"]:checked') || {}).value !== 'prpo') m.push('Supplier ทุกบรรทัด');
         const wrap = document.getElementById('planWrap');

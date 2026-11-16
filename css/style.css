@@ -1147,3 +1147,4 @@ button.link { color: var(--brand); }
 .group-purpose input { width: 100%; }
 .gov-set .out { min-height: var(--control-h); display: flex; align-items: center; justify-content: flex-end; font-variant-numeric: tabular-nums; }
 .gov-set .out.left { justify-content: flex-start; }
+.group-pick > .group-title { flex: 0 1 360px; min-width: 0; }
