@@ -1096,3 +1096,7 @@ button.link { color: var(--brand); }
 .copy-row { display: flex; gap: var(--s-3); align-items: flex-end; flex-wrap: wrap; }
 .copy-row .field { flex: 1 1 22rem; margin-bottom: 0; }
 .copy-card .small-note { margin: var(--s-2) 0 0; }
+
+/* ---- ช่องข้อมูลตามไฟล์ Governance (การจัดลำดับความสำคัญ) */
+.prio-set { margin-bottom: var(--s-4); }
+.prio-set textarea { min-height: 64px; }
