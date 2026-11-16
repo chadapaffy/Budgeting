@@ -1137,3 +1137,8 @@ button.link { color: var(--brand); }
 .group-del { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: var(--danger); color: var(--surface); cursor: pointer; flex: none; }
 .group-del:hover { opacity: .85; }
 .group-del svg { width: 15px; height: 15px; }
+.group-pick { display: flex; align-items: center; gap: var(--s-3); flex: 1 1 auto; min-width: 0; flex-wrap: wrap; }
+.group-pick > .select-wrap { flex: 0 1 300px; min-width: 0; }
+.group-inv { display: flex; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+.group-inv .select-wrap { width: 7.5rem; }
+.group-note { margin: 0 0 var(--s-3); font-size: var(--fs-sm); color: var(--muted); }

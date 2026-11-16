@@ -157,7 +157,7 @@
       addBy(suppliers, 'name', { name: l.supplier });
     }));
     // คำขอ OPEX เดิมที่ยังไม่มี Supplier รายบรรทัด: ใช้ชื่อผู้รับเงินเป็นตัวเลือก
-    (d.requests || []).forEach((r) => { if (r.type === 'CBS' && r.payee && !(r.lines || []).some((l) => l.supplier)) addBy(suppliers, 'name', { name: r.payee }); });
+    (d.requests || []).forEach((r) => { if (r.payee && !/ราย \(ดูรายการ\)$/.test(r.payee) && !(r.lines || []).some((l) => l.supplier)) addBy(suppliers, 'name', { name: r.payee }); });
     (d.budgets || []).forEach((b) => {
       addBy(companies, 'code', { code: b.company, name: '' });
       addBy(departments, 'name', { name: b.department });
@@ -3439,26 +3439,8 @@
     }).join('');
   }
 
-  /** single = เลือกรายการเดียวทั้งใบ (ไม่มีช่องเลือกรายการต้นทุนในแต่ละบรรทัด) */
-  function lineRow(b, line, single, existing) {
-    const vat = line.vat === undefined ? b.type === 'CAPEX' : Number(line.vat) > 0;
-    const withCat = single && b.structure === 'project';
-    return '<tr class="line-row">' +
-      '<td class="line-no"></td>' +
-      (withCat ? '<td><div class="select-wrap"><select name="lnCat" aria-label="หมวดค่าใช้จ่าย"><option value="">— เลือกหมวด —</option>' +
-        optList(db.master.expenseCategories, 'name', (c) => c.name, line.category || '') + '</select></div></td>' +
-        '<td>' + investorSelect('lnInv', line.investor || b.company) + '</td>' : '') +
-      (single ? '' : '<td><div class="select-wrap"><select name="lnItem" aria-label="' + (b.type === 'CAPEX' ? 'รายการย่อย (Item No.)' : 'รายการต้นทุน') + '"><option value="">— เลือก —</option>' +
-        itemOptions(b, existing, line.itemId, false) + '</select></div></td>') +
-      '<td><input name="lnDesc" value="' + esc(line.description || '') + '" aria-label="รายการ" placeholder="' +
-      (b.type === 'CAPEX' ? 'เช่น เครื่องชั่งดิจิตอล ละเอียด 1 mg' : 'เช่น ค่าแรงดูแลกล้า 3 วัน @349') + '"></td>' +
-      '<td><input name="lnAmount" type="number" min="0" step="0.01" class="right" value="' + esc(line.amountBeforeVat || '') + '" aria-label="ก่อน VAT"></td>' +
-      '<td class="center"><input name="lnVat" type="checkbox"' + (vat ? ' checked' : '') + ' aria-label="VAT 7%"></td>' +
-      '<td class="num ln-total">0.00</td>' +
-      '<td><button type="button" class="btn small bad" data-remove-line title="ลบบรรทัด">×</button></td></tr>';
-  }
-
-  // ---- ฟอร์มขอเบิก OPEX: จัดกลุ่มตาม Item — แต่ละ Item มีหลายบรรทัด (Supplier · รายละเอียด · จำนวนเงิน)
+  // ---- ฟอร์มขอเบิก (CAPEX / OPEX): จัดกลุ่มตาม Item — หรือตามหมวดค่าใช้จ่าย + บริษัทที่ลงทุน สำหรับงบรวมทั้งโครงการ
+  //      แต่ละกลุ่มมีหลายบรรทัด (Supplier · รายละเอียด · จำนวนเงิน · VAT)
   const SUP_NEW = '__new';
   const ICON_TRASH = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
   const GROUP_COLS = '<colgroup><col class="c-no"><col class="c-sup"><col><col class="c-amt"><col class="c-vat"><col class="c-tot"><col class="c-del"></colgroup>';
@@ -3468,35 +3450,45 @@
     return '<option value="">— เลือก —</option>' + names.map((n) => '<option value="' + esc(n) + '"' + (n === selected ? ' selected' : '') + '>' + esc(n) + '</option>').join('') +
       '<option value="' + SUP_NEW + '">+ เพิ่มชื่อใหม่…</option>';
   }
-  function supRow(line) {
+  function supRow(line, capex) {
+    const vat = line.vat === undefined ? !!capex : Number(line.vat) > 0;
     return '<tr class="line-row"><td class="line-no"></td>' +
       '<td><div class="select-wrap"><select name="lnSupplier" aria-label="Supplier">' + supplierOptions(line.supplier || '') + '</select></div></td>' +
-      '<td><input name="lnDesc" value="' + esc(line.description || '') + '" aria-label="รายละเอียด" placeholder="เช่น ค่าแรงดูแลกล้า"></td>' +
+      '<td><input name="lnDesc" value="' + esc(line.description || '') + '" aria-label="รายละเอียด" placeholder="' + (capex ? 'เช่น เครื่องชั่งดิจิตอล 1 mg' : 'เช่น ค่าแรงดูแลกล้า') + '"></td>' +
       '<td><input name="lnAmount" type="number" min="0" step="0.01" class="right" placeholder="0.00" value="' + esc(line.amountBeforeVat || '') + '" aria-label="จำนวนก่อน VAT"></td>' +
-      '<td class="center"><input name="lnVat" type="checkbox"' + (Number(line.vat) > 0 ? ' checked' : '') + ' aria-label="VAT 7%"></td>' +
+      '<td class="center"><input name="lnVat" type="checkbox"' + (vat ? ' checked' : '') + ' aria-label="VAT 7%"></td>' +
       '<td class="num ln-total">0.00</td>' +
       '<td class="center"><button type="button" class="row-x" data-remove-line title="ลบบรรทัด" aria-label="ลบบรรทัด">×</button></td></tr>';
   }
-  function itemGroup(b, existing, itemId, rows) {
+  function itemGroup(b, existing, key, rows) {
+    const capex = b.type === 'CAPEX';
+    const pick = b.structure === 'project'
+      ? '<div class="group-pick"><div class="select-wrap"><select name="lnCat" aria-label="หมวดค่าใช้จ่าย"><option value="">— เลือกหมวดค่าใช้จ่าย —</option>' +
+        optList(db.master.expenseCategories, 'name', (c) => c.name, key.category || '') + '</select></div>' +
+        '<label class="group-inv"><span>บริษัทที่ลงทุน</span>' + investorSelect('lnInv', key.investor || b.company) + '</label></div>'
+      : '<div class="select-wrap"><select name="lnItem" aria-label="' + (capex ? 'รายการย่อย (Item No.)' : 'รายการต้นทุน (Item)') + '"><option value="">— เลือก Item —</option>' +
+        itemOptions(b, existing, key.itemId || '', false) + '</select></div>';
     return '<div class="item-group">' +
-      '<div class="item-group-head"><div class="select-wrap"><select name="lnItem" aria-label="รายการต้นทุน (Item)"><option value="">— เลือก Item —</option>' +
-      itemOptions(b, existing, itemId, false) + '</select></div>' +
+      '<div class="item-group-head">' + pick +
       '<button type="button" class="group-del" data-remove-group title="ลบรายการนี้" aria-label="ลบรายการนี้">' + ICON_TRASH + '</button></div>' +
       '<div class="table-wrap"><table class="edit-table group-table">' + GROUP_COLS +
       '<thead><tr><th>No.</th><th data-sup>Supplier</th><th class="req">รายละเอียด</th><th class="num req">จำนวนก่อน VAT</th><th class="center">VAT 7%</th><th class="num">รวม</th><th></th></tr></thead>' +
-      '<tbody class="group-rows">' + rows.map(supRow).join('') + '</tbody></table></div>' +
+      '<tbody class="group-rows">' + rows.map((l) => supRow(l, capex)).join('') + '</tbody></table></div>' +
       '<button type="button" class="link-add" data-add-row>+ เพิ่ม Supplier</button></div>';
   }
-  /** บรรทัดเดิม → กลุ่มตาม Item (เรียงตามที่พบก่อน) */
-  const groupLines = (lines) => {
+  /** บรรทัดเดิม → กลุ่ม (เรียงตามที่พบก่อน): ตาม Item หรือ ตามหมวด + บริษัทที่ลงทุน (งบรวมโครงการ) */
+  const groupLines = (b, lines) => {
+    const project = b.structure === 'project';
+    const keyOf = (l) => (project ? { category: l.category || '', investor: l.investor || b.company } : { itemId: l.itemId || '' });
     const out = [];
     lines.forEach((l) => {
-      const key = l.itemId || '';
-      let g = out.find((x) => x.itemId === key);
-      if (!g) { g = { itemId: key, rows: [] }; out.push(g); }
+      const key = keyOf(l);
+      const id = JSON.stringify(key);
+      let g = out.find((x) => x.id === id);
+      if (!g) { g = { id, key, rows: [] }; out.push(g); }
       g.rows.push(l);
     });
-    return out.length ? out : [{ itemId: '', rows: [{}] }];
+    return out.length ? out : [{ key: keyOf({}), rows: [{}] }];
   };
 
   function viewRequestForm(budgetId, requestId, params) {
@@ -3515,7 +3507,7 @@
     // ทำซ้ำรายการเบิก: คัดลอกคำขอเดิมของตนเอง (งบเดียวกัน) มาเป็นร่างฟอร์มใหม่ — ได้เลขที่คำขอใหม่เมื่อส่ง
     const src = !existing && params.get('copy') ? requestById(params.get('copy')) : null;
     const dup = src && src.budgetId === b.id && src.requesterId === u.id ? src : null;
-    const dupLines = dup ? dup.lines.map((l) => Object.assign({}, l, { itemId: perLine && !itemById(b, l.itemId) ? '' : l.itemId }, b.type === 'CBS' ? { supplier: l.supplier || dup.payee || '' } : {})) : null;
+    const dupLines = dup ? dup.lines.map((l) => Object.assign({}, l, { itemId: perLine && !itemById(b, l.itemId) ? '' : l.itemId }, { supplier: l.supplier || dup.payee || '' })) : null;
     const v = existing || (dup ? { itemId: isProject ? b.items[0].id : '', useType: dup.useType || 'prpo', purpose: dup.purpose, payee: dup.payee, paymentPlan: dup.paymentPlan }
       : { itemId: params.get('item') || (isProject ? b.items[0].id : ''), useType: 'prpo' });
     const lines = existing ? existing.lines : dupLines && dupLines.length ? dupLines : [{ itemId: perLine ? params.get('item') || '' : '' }];
@@ -3531,52 +3523,28 @@
     const step = (n, title, extra) => '<div class="section-head"><h2 class="section-title"><span class="step">' + n + '</span>' + title + '</h2>' + (extra || '') + '</div>';
     const opex = b.type === 'CBS';
     const typeCard = (k) => '<label class="choice-opt"><input type="radio" name="useType" value="' + k + '"' + (v.useType === k ? ' checked' : '') + '>' +
-      '<span><strong>' + USE_TYPES[k].label + '</strong><small>' + (opex ? USE_TYPES[k].hint || USE_TYPES[k].cut : USE_TYPES[k].cut + (USE_TYPES[k].hint ? ' · ' + USE_TYPES[k].hint : '')) + '</small></span></label>';
+      '<span><strong>' + USE_TYPES[k].label + '</strong><small>' + (USE_TYPES[k].hint || USE_TYPES[k].cut) + '</small></span></label>';
     const typeSub = (k) => (USE_TYPES[k] ? USE_TYPES[k].label + ': ' + USE_TYPES[k].cut : '');
     const projOwn = existing && isReserving(existing) ? existing.amount : 0;
-    const attachField = '<div class="field"><span>เอกสารประกอบ (ใบเสนอราคา ฯลฯ — ไม่บังคับ)</span><div id="reqFiles">' + attachList(v.attachments, { del: true, empty: 'ยังไม่มีไฟล์' }) + '</div>' +
-          '<label class="btn small file-btn">+ แนบไฟล์<input type="file" id="reqFileInput" accept="application/pdf,image/png,image/jpeg" multiple hidden></label></div>';
     const general = '<section class="card form-section">' +
-        (opex ? '<div class="section-head"><div><h2 class="section-title"><span class="step">1</span>ประเภทการเบิกใช้งบ</h2><div class="section-sub" id="useTypeSub">' + esc(typeSub(v.useType)) + '</div></div></div>'
-          : step(1, 'ประเภทการเบิกใช้งบ')) +
-        '<div class="choice choice-4">' + Object.keys(USE_TYPES).map(typeCard).join('') + '</div></section>' +
-      (opex ? '' : '<section class="card form-section">' + step(2, 'ข้อมูลการดำเนินการ') + '<div class="form-grid">' +
-      (perLine ? '' : '<div class="full">' +
-            '<input type="hidden" name="itemId" value="' + esc(b.items[0].id) + '" data-remaining="' + round2(usage(b).remaining + projOwn) + '">' +
-              '<div class="field"><span>งบที่ใช้</span><div class="out left">งบรวมทั้งโครงการ ' + esc(b.code) + ' — คงเหลือ ' + money(round2(usage(b).remaining + projOwn)) + ' บาท</div></div></div>') +
-          '<div class="full">' + field('วัตถุประสงค์ในการใช้งบ' + (b.type === 'CBS' ? ' (ไม่บังคับ)' : ''), '<textarea name="purpose" rows="3"' + (b.type === 'CBS' ? '' : ' required') + ' placeholder="เช่น จัดซื้อเครื่องชั่งสำหรับห้องปฏิบัติการ">' + esc(v.purpose || '') + '</textarea>') + '</div>' +
-          field('<span id="payeeLabel">Supplier / ผู้รับเงิน</span>', '<input name="payee" required' + val('payee') + '>') +
-          attachField +
-      '</div></section>');
+        '<div class="section-head"><div><h2 class="section-title"><span class="step">1</span>ประเภทการเบิกใช้งบ</h2><div class="section-sub" id="useTypeSub">' + esc(typeSub(v.useType)) + '</div></div></div>' +
+        '<div class="choice choice-4">' + Object.keys(USE_TYPES).map(typeCard).join('') + '</div></section>';
 
     const today = new Date().toISOString().slice(0, 10);
-    const opexCard = '<section class="card form-section">' +
+    const projRemain = round2(usage(b).remaining + projOwn);
+    const itemsCard = '<section class="card form-section">' +
       step(2, 'ข้อมูลการดำเนินการ', '<button type="button" class="btn" id="addGroup">+ เพิ่มรายการใหม่</button>') +
       '<div class="form-grid req-dates">' +
         field('วันที่ส่งมอบ/วางบิล', '<input type="date" name="deliveryDate" required value="' + esc((existing && existing.deliveryDate) || today) + '">') +
         field('วันที่กำหนดจ่ายเงิน', '<input type="date" name="payDueDate" required value="' + esc((existing && existing.payDueDate) || today) + '">') + '</div>' +
-      '<div class="groups-box"><div id="itemGroups">' + groupLines(lines).map((g) => itemGroup(b, existing, g.itemId, g.rows)).join('') + '</div>' +
+      (isProject ? '<input type="hidden" name="itemId" value="' + esc(b.items[0].id) + '" data-remaining="' + projRemain + '">' +
+        '<p class="group-note">งบรวมทั้งโครงการ ' + esc(b.code) + ' — คงเหลือ <strong>' + money(projRemain) + '</strong> บาท · แต่ละกลุ่มเลือกหมวดค่าใช้จ่าย และบริษัทที่ลงทุน</p>' : '') +
+      '<div class="groups-box"><div id="itemGroups">' + groupLines(b, lines).map((g) => itemGroup(b, existing, g.key, g.rows)).join('') + '</div>' +
       '<div class="table-wrap group-sum"><table class="edit-table group-table">' + GROUP_COLS +
       '<tbody><tr><td colspan="3" class="right"><strong>รวม</strong></td><td class="num"><strong id="sumBefore">0.00</strong></td><td class="num"><strong id="sumVat">0.00</strong></td><td class="num"><strong id="sumTotal">0.00</strong></td><td></td></tr></tbody></table></div></div>' +
-      '<template id="groupTpl">' + itemGroup(b, existing, '', [{}]) + '</template><template id="supRowTpl">' + supRow({}) + '</template>' +
+      '<template id="groupTpl">' + itemGroup(b, existing, {}, [{}]) + '</template><template id="supRowTpl">' + supRow({}, b.type === 'CAPEX') + '</template>' +
       '<div class="req-meta"><div class="field"><span>เอกสารประกอบ</span><div class="attach-box"><label class="btn small file-btn">+ แนบไฟล์<input type="file" id="reqFileInput" accept="application/pdf,image/png,image/jpeg" multiple hidden></label>' +
       '<div id="reqFiles">' + attachList(v.attachments, { del: true, empty: 'ยังไม่มีไฟล์แนบ' }) + '</div></div></div></div>' +
-      '<div id="overBudget" hidden>' +
-      '<div class="alert warn" id="overText"></div>' +
-          field('เหตุผลที่ต้องใช้เกินงบ (ถ้ามี — ผู้คุมงบใช้ประกอบการพิจารณา)', '<textarea name="requesterReason" rows="2">' + esc(v.requesterReason || '') + '</textarea>') +
-      '</div></section>';
-
-    const linesCard = '<section class="card form-section">' +
-      step(3, 'รายการที่ขอใช้', '<button type="button" class="btn" id="addLine">+ เพิ่มบรรทัด</button>') +
-      '<div class="table-wrap"><table class="edit-table lines-table"><thead><tr><th style="width:2.5rem">#</th>' +
-      (perLine ? '<th style="width:24%">' + (b.type === 'CAPEX' ? 'รายการย่อย (Item No.)' : 'รายการต้นทุน (OPEX)') + '</th>' : isProject ? '<th style="width:20%">หมวดค่าใช้จ่าย</th><th style="width:7rem">บริษัทที่ลงทุน</th>' : '') +
-      '<th>รายละเอียดสิ่งที่ซื้อ / จ่าย</th>' +
-      '<th class="num" style="width:8rem">ก่อน VAT</th><th class="center" style="width:4rem">VAT 7%</th><th class="num" style="width:7.5rem">รวม</th><th style="width:2.5rem"></th></tr></thead>' +
-      '<tbody id="lineRows">' + lines.map((l) => lineRow(b, l, single, existing)).join('') + '</tbody>' +
-      '<tfoot><tr><td colspan="' + (isProject ? 4 : 3) + '" class="right muted">รวมทั้งหมด</td>' +
-      '<td class="num" id="sumBefore">0.00</td><td class="num" id="sumVat">0.00</td><td class="num"><strong id="sumTotal">0.00</strong></td><td></td></tr></tfoot>' +
-      '</table></div>' +
-      '<template id="lineTpl">' + lineRow(b, {}, single, existing) + '</template>' +
       '<div id="overBudget" hidden>' +
       '<div class="alert warn" id="overText"></div>' +
           field('เหตุผลที่ต้องใช้เกินงบ (ถ้ามี — ผู้คุมงบใช้ประกอบการพิจารณา)', '<textarea name="requesterReason" rows="2">' + esc(v.requesterReason || '') + '</textarea>') +
@@ -3593,13 +3561,9 @@
       (memoOk ? '<p class="muted memo-side-note" id="memoNote"' + (needMemo ? '' : ' hidden') + '><strong id="memoReason">' + esc(memoReason(b, lines)) + '</strong><br>' +
         '<strong>ทำ Memo:</strong> ระบบบันทึกคำขอ ออกเลขที่ Memo และจองงบไว้ → กรอก Memo ตามแบบฟอร์ม แล้วพิมพ์ ไปให้ผู้บริหารเซ็น → กลับมาแนบไฟล์ที่เซ็นแล้วที่หน้าคำขอ จึงส่งให้ผู้คุมงบได้' +
         (existing && existing.memo && existing.memo.no ? '<br>Memo เดิมเลขที่ ' + esc(existing.memo.no) + ' — แก้ไขแล้วต้องให้ผู้บริหารเซ็นใหม่' : '') + '</p></div>' : '</div>') +
-      (opex ? '<div class="card form-tip"><h3 class="side-title">คำแนะนำในการเบิก</h3><p class="tip-head">กรณีขอเกินงบประมาณ</p><p class="muted">ขอเกินงบรายการได้ โดยผู้คุมงบต้องใส่ Note · หากยอดเกินงบรวมโครงการ ผู้คุมงบจะพิจารณาโยกงบให้ หรือให้ขอเพิ่มงบ</p>' +
-        '<p class="tip-head">หลาย Supplier ในรายการเดียว</p><p class="muted">กด "+ เพิ่ม Supplier" ใต้รายการ เช่น ค่าแรงคนงานหลายคน · Supplier ใหม่เลือก "+ เพิ่มชื่อใหม่…" ในช่อง Supplier</p></div>' :
-      '<div class="card form-tip"><h3 class="side-title">คำแนะนำในการเบิก</h3><p class="muted">' +
-      (perLine ? 'ใบเดียวใช้ได้หลาย Item — ใส่ได้หลายบรรทัด แต่ละบรรทัดเลือก Item เอง (บรรทัดใหม่ใช้ Item เดียวกับบรรทัดก่อนหน้าเป็นค่าเริ่มต้น)'
-        : 'งบรวมโครงการ: แต่ละบรรทัดเลือกหมวดค่าใช้จ่ายและพิมพ์รายละเอียด') +
-          ' · ขอเกินงบรายการได้ถ้าไม่เกินงบรวมของโครงการ (ผู้คุมงบต้องใส่ Note) · ถ้าเกินงบโครงการ ผู้คุมงบจะพิจารณาโยกงบให้ หรือให้ขอเพิ่มงบ' +
-          '</p></div>');
+      '<div class="card form-tip"><h3 class="side-title">คำแนะนำในการเบิก</h3><p class="tip-head">กรณีขอเกินงบประมาณ</p><p class="muted">ขอเกินงบรายการได้ โดยผู้คุมงบต้องใส่ Note · หากยอดเกินงบรวมโครงการ ผู้คุมงบจะพิจารณาโยกงบให้ หรือให้ขอเพิ่มงบ</p>' +
+        '<p class="tip-head">หลาย Supplier ในรายการเดียว</p><p class="muted">กด "+ เพิ่ม Supplier" ใต้รายการ' + (opex ? ' เช่น ค่าแรงคนงานหลายคน' : '') + ' · Supplier ใหม่เลือก "+ เพิ่มชื่อใหม่…" ในช่อง Supplier</p>' +
+        (isProject ? '<p class="tip-head">งบรวมทั้งโครงการ</p><p class="muted">ไม่มี Item ให้เลือก — แต่ละกลุ่มเลือกหมวดค่าใช้จ่าย และบริษัทที่ลงทุน (ใช้เงินข้ามบริษัทกับ PCC ต้องทำ Memo ให้ผู้บริหารเซ็นก่อนส่ง)</p>' : '') + '</div>';
 
     return '<div class="page-head"><div><h1>' + (existing ? 'แก้ไขคำขอ ' + esc(existing.no) : 'ขอเบิกใช้งบ') + '</h1>' +
       '<div class="page-sub">' + badge(b.type, TYPE_SHORT[b.type]) + ' ' + esc(b.code + ' ' + b.name) + '</div></div>' +
@@ -3608,8 +3572,8 @@
       (dup ? '<div class="alert info">ทำซ้ำจากคำขอ <strong>' + esc(dup.no) + '</strong> — เพิ่ม ลด หรือแก้รายการและจำนวนเงินได้ · ได้เลขที่คำขอใหม่เมื่อส่ง · ไม่คัดลอกไฟล์แนบและ Memo · <a href="#/request/new/' + b.id + '">เริ่มใหม่โดยไม่คัดลอก</a></div>' : '') +
       '<div id="formError"></div>' +
       '<form id="requestForm" class="req-form" data-budget="' + b.id + '" data-request="' + esc(requestId || '') + '" data-remaining="' + remaining + '">' +
-      '<div class="detail-layout"><div class="detail-main form-main">' + general + (opex ? opexCard : linesCard) +
-      '<div id="planWrap">' + planFieldset(existing ? existing.paymentPlan : dup && dup.paymentPlan, opex ? 3 : 4) + '</div>' +
+      '<div class="detail-layout"><div class="detail-main form-main">' + general + itemsCard +
+      '<div id="planWrap">' + planFieldset(existing ? existing.paymentPlan : dup && dup.paymentPlan, 3) + '</div>' +
       '</div><aside class="detail-side">' + side + '</aside></div></form>';
   }
 
@@ -3656,7 +3620,8 @@
 
   /** บรรทัดรายการในฟอร์มขอเบิก และช่องเลือก Item ของบรรทัด (ในบรรทัดเอง หรือหัวกลุ่ม) */
   const lineTrs = (form) => Array.from(form.querySelectorAll('tr.line-row'));
-  const rowItemSel = (tr) => tr.querySelector('[name="lnItem"]') || (tr.closest('.item-group') ? tr.closest('.item-group').querySelector('[name="lnItem"]') : null);
+  const rowField = (tr, name) => tr.querySelector('[name="' + name + '"]') || (tr.closest('.item-group') ? tr.closest('.item-group').querySelector('[name="' + name + '"]') : null);
+  const rowItemSel = (tr) => rowField(tr, 'lnItem');
   const rowSupplier = (tr) => {
     const el = tr.querySelector('[name="lnSupplier"]');
     if (!el) return undefined;
@@ -3671,8 +3636,8 @@
       return {
         tr,
         itemId: isCapex ? form.elements.itemId.value : (rowItemSel(tr) || {}).value || '',
-        category: tr.querySelector('[name="lnCat"]') ? tr.querySelector('[name="lnCat"]').value : undefined,
-        investor: tr.querySelector('[name="lnInv"]') ? tr.querySelector('[name="lnInv"]').value : undefined,
+        category: rowField(tr, 'lnCat') ? rowField(tr, 'lnCat').value : undefined,
+        investor: rowField(tr, 'lnInv') ? rowField(tr, 'lnInv').value : undefined,
         description: tr.querySelector('[name="lnDesc"]').value.trim(),
         supplier: rowSupplier(tr),
         amountBeforeVat: before, vat, amount: round2(before + vat)
@@ -3702,7 +3667,6 @@
     const perLine = b.structure !== 'project'; // เลือก Item ทีละบรรทัด (ใบเดียวหลาย Item)
     const isCapex = !perLine; // ชื่อเดิม: = งบรวมโครงการ (ใช้ f.itemId ที่ซ่อนไว้)
     const existing = form.dataset.request ? requestById(form.dataset.request) : null;
-    const tbody = document.getElementById('lineRows');
     let files = existing ? (existing.attachments || []).slice() : [];
     const fileInput = document.getElementById('reqFileInput');
     const showFiles = () => { document.getElementById('reqFiles').innerHTML = attachList(files, { del: true, empty: 'ยังไม่มีไฟล์' }); };
@@ -3720,7 +3684,7 @@
     // ---- ต้องทำ Memo หรือไม่: ดูจากบริษัทที่ลงทุนของทุกบรรทัด (ใช้เงินข้ามบริษัทกับ PCC)
     const rowLines = () => lineTrs(form).map((tr) => ({
       itemId: rowItemSel(tr) ? rowItemSel(tr).value : (f.itemId ? f.itemId.value : ''),
-      investor: tr.querySelector('[name="lnInv"]') ? tr.querySelector('[name="lnInv"]').value : undefined
+      investor: rowField(tr, 'lnInv') ? rowField(tr, 'lnInv').value : undefined
     }));
     const needMemo = () => memoRequired(b, rowLines());
     const syncMemo = () => {
@@ -3860,7 +3824,7 @@
       };
       document.getElementById('addGroup').addEventListener('click', () => {
         addGroup();
-        groupsBox.lastElementChild.querySelector('[name="lnItem"]').focus();
+        groupsBox.lastElementChild.querySelector('.item-group-head select').focus();
       });
       groupsBox.addEventListener('click', (e) => {
         const g = e.target.closest('.item-group');
@@ -3899,22 +3863,6 @@
         sel.dispatchEvent(new Event('change', { bubbles: true }));
       });
     }
-    if (document.getElementById('addLine')) document.getElementById('addLine').addEventListener('click', () => {
-      tbody.insertAdjacentHTML('beforeend', document.getElementById('lineTpl').innerHTML);
-      // บรรทัดใหม่ใช้ Item เดียวกับบรรทัดก่อนหน้าเป็นค่าเริ่มต้น
-      if (perLine && tbody.rows.length > 1) {
-        tbody.rows[tbody.rows.length - 1].querySelector('[name="lnItem"]').value = tbody.rows[tbody.rows.length - 2].querySelector('[name="lnItem"]').value;
-      }
-      tbody.rows[tbody.rows.length - 1].querySelector('[name="lnDesc"]').focus();
-      syncType();
-      update();
-    });
-    if (tbody) tbody.addEventListener('click', (e) => {
-      if (e.target.matches('[data-remove-line]') && tbody.rows.length > 1) {
-        e.target.closest('tr').remove();
-        update();
-      }
-    });
     update();
 
     form.addEventListener('submit', async (e) => {
@@ -6115,7 +6063,7 @@
     // ---- ขอเบิกใช้งบ
     const rf = document.getElementById('requestForm');
     if (rf) {
-      markReq(rf, (budgetById(rf.dataset.budget) || {}).type === 'CBS' ? ['itemId', 'deliveryDate', 'payDueDate'] : ['itemId', 'purpose']); // OPEX ไม่มีวัตถุประสงค์ แต่ต้องมีวันที่ส่งมอบ / กำหนดจ่าย
+      markReq(rf, ['itemId', 'deliveryDate', 'payDueDate']); // ไม่มีวัตถุประสงค์ แต่ต้องมีวันที่ส่งมอบ / กำหนดจ่าย
       markReqText(rf, '.section-title', /ประเภทการเบิกใช้งบ/);
       markReqText(rf, '.lines-table thead th', /^(รายการต้นทุน \(OPEX\)|Supplier และรายละเอียด|รายการย่อย \(Item No\.\)|หมวดค่าใช้จ่าย|รายละเอียด|ก่อน VAT)/);
       markReq(rf, ['memoTo', 'memoApprovers']);
@@ -6130,7 +6078,7 @@
         if (e.payDueDate && !filled(e.payDueDate)) m.push('วันที่กำหนดจ่ายเงิน');
         const rows = lineTrs(f).map((tr) => ({
           desc: filled(tr.querySelector('[name="lnDesc"]')), amt: Number(tr.querySelector('[name="lnAmount"]').value || 0),
-          item: rowItemSel(tr), cat: tr.querySelector('[name="lnCat"]'), sup: tr.querySelector('[name="lnSupplier"]')
+          item: rowItemSel(tr), cat: rowField(tr, 'lnCat'), sup: tr.querySelector('[name="lnSupplier"]')
         }));
         const used = rows.filter((r) => r.desc || r.amt);
         if (!used.length) m.push('รายการที่ขอใช้อย่างน้อย 1 บรรทัด');
