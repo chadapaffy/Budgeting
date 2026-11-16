@@ -1101,3 +1101,8 @@ button.link { color: var(--brand); }
 .prio-set { margin-bottom: var(--s-4); }
 .prio-set textarea { min-height: 64px; }
 .lines-table .ln-worker { margin-top: var(--s-2); }
+.section-head .actions { margin-top: 0; }
+@media (min-width: 721px) {
+  .section-head .actions { flex-wrap: nowrap; }
+  .section-head .actions .btn, .section-head .section-title { white-space: nowrap; }
+}
