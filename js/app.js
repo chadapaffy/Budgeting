@@ -3488,14 +3488,20 @@
       (perLine ? '' : '<div class="full">' +
             '<input type="hidden" name="itemId" value="' + esc(b.items[0].id) + '" data-remaining="' + round2(usage(b).remaining + projOwn) + '">' +
               '<div class="field"><span>งบที่ใช้</span><div class="out left">งบรวมทั้งโครงการ ' + esc(b.code) + ' — คงเหลือ ' + money(round2(usage(b).remaining + projOwn)) + ' บาท</div></div></div>') +
-          '<div class="full">' + field('วัตถุประสงค์ในการใช้งบ', '<textarea name="purpose" rows="3" required placeholder="เช่น จัดซื้อเครื่องชั่งสำหรับห้องปฏิบัติการ">' + esc(v.purpose || '') + '</textarea>') + '</div>' +
+          '<div class="full">' + field('วัตถุประสงค์ในการใช้งบ' + (b.type === 'CBS' ? ' (ไม่บังคับ)' : ''), '<textarea name="purpose" rows="3"' + (b.type === 'CBS' ? '' : ' required') + ' placeholder="เช่น จัดซื้อเครื่องชั่งสำหรับห้องปฏิบัติการ">' + esc(v.purpose || '') + '</textarea>') + '</div>' +
           field('<span id="payeeLabel">Supplier / ผู้รับเงิน</span>', '<input name="payee" required' + val('payee') + '>') +
           '<div class="field"><span>เอกสารประกอบ (ใบเสนอราคา ฯลฯ — ไม่บังคับ)</span><div id="reqFiles">' + attachList(v.attachments, { del: true, empty: 'ยังไม่มีไฟล์' }) + '</div>' +
           '<label class="btn small file-btn">+ แนบไฟล์<input type="file" id="reqFileInput" accept="application/pdf,image/png,image/jpeg" multiple hidden></label></div>' +
       '</div></section>';
 
     const linesCard = '<section class="card form-section">' +
-      step(3, 'รายการที่ขอใช้', '<button type="button" class="btn" id="addLine">+ เพิ่มบรรทัด</button>') +
+      step(3, 'รายการที่ขอใช้', '<div class="actions"><button type="button" class="btn" id="importLines">นำเข้ารายการจาก Excel</button><button type="button" class="btn" id="addLine">+ เพิ่มบรรทัด</button></div>') +
+      '<div class="alert info" id="linesImport" hidden><p>เบิกค่าแรงหลายคน: วางแถวที่คัดลอกจาก Excel หรือเลือกไฟล์ .xlsx / .csv — คอลัมน์เรียงเป็น ' +
+      '<strong>รหัส Item · ชื่อเจ้าหนี้ / คนงาน · รายละเอียด · จำนวนเงิน (ก่อน VAT) · VAT (ใส่ Y ถ้ามี)</strong> (มีแถวหัวตารางหรือไม่ก็ได้ — ถ้ามีหัวตาราง ระบบหาคอลัมน์จากชื่อหัว) · 1 แถว = 1 บรรทัด</p>' +
+      '<label class="field"><span>วางแถวจาก Excel</span><textarea id="pasteBox" rows="4" placeholder="2.1 [Tab] นางสมมติ ตัวอย่าง [Tab] ค่าแรงดูแลกล้า 10/5/2026 @349 [Tab] 3490"></textarea></label>' +
+      '<div class="actions"><button type="button" class="btn primary" id="pasteGo">เพิ่มเข้าตาราง</button>' +
+      '<label class="btn file-btn">เลือกไฟล์ Excel / CSV<input type="file" id="linesFile" accept=".xlsx,.csv" hidden></label>' +
+      '<button type="button" class="btn" id="linesTpl">ดาวน์โหลดไฟล์ตัวอย่าง</button></div><div id="linesImportMsg" class="muted"></div></div>' +
       '<div class="table-wrap"><table class="edit-table lines-table"><thead><tr><th style="width:2.5rem">#</th>' +
       (perLine ? '<th style="width:30%">' + (b.type === 'CAPEX' ? 'รายการย่อย (Item No.)' : 'รายการต้นทุน (OPEX)') + '</th>' : isProject ? '<th style="width:20%">หมวดค่าใช้จ่าย</th><th style="width:7rem">บริษัทที่ลงทุน</th>' : '') +
       '<th>' + (b.type === 'CBS' ? 'รายละเอียด (ถ้ามีจำนวน โปรดระบุ)' : 'รายละเอียดสิ่งที่ซื้อ / จ่าย') + '</th>' +
@@ -3704,7 +3710,7 @@
           const cat = tr.querySelector('[name="lnCat"]');
           const labor = (it && it.selectedOptions[0] && it.selectedOptions[0].dataset.labor === '1') || (cat && isLaborText(cat.value)) ||
             (!it && !cat && f.itemId && isLaborItem(b, itemById(b, f.itemId.value)));
-          w.hidden = !labor;
+          w.hidden = !(labor || w.value.trim());
         }
         const before = round2(tr.querySelector('[name="lnAmount"]').value);
         const vat = tr.querySelector('[name="lnVat"]').checked ? round2(before * VAT_RATE) : 0;
@@ -3787,6 +3793,78 @@
     });
     update();
 
+    // ---- นำเข้ารายการ (เช่น รายชื่อคนงานเบิกค่าแรง) จากแถวที่วางหรือไฟล์ Excel / CSV
+    const panel = document.getElementById('linesImport');
+    const msg = document.getElementById('linesImportMsg');
+    document.getElementById('importLines').addEventListener('click', () => { panel.hidden = !panel.hidden; });
+    const parseLines = (rows) => {
+      const norm = (x) => String(x == null ? '' : x).replace(/\s+/g, '').toLowerCase();
+      const live = rows.filter((r) => r.some((x) => String(x == null ? '' : x).trim()));
+      const HEAD = { item: /^(no\.?item|รหัสitem|item|รหัส)/, worker: /(เจ้าหนี้|คนงาน|supplier|ผู้รับ)/, desc: /^รายละเอียด/, amount: /^(จำนวนเงิน|ก่อนvat|ยอดเงิน|amount)/, vat: /^(vat|ภาษี)/ };
+      const first = (live[0] || []).map(norm);
+      const hasHead = first.some((h) => h && Object.values(HEAD).some((re) => re.test(h)) && isNaN(Number(h.replace(/,/g, ''))));
+      const ix = { item: 0, worker: 1, desc: 2, amount: 3, vat: 4 };
+      if (hasHead) Object.keys(HEAD).forEach((k) => { ix[k] = first.findIndex((h) => h && HEAD[k].test(h)); });
+      const body = hasHead ? live.slice(1) : live;
+      const num = (v) => (typeof v === 'number' ? v : Number(String(v == null ? '' : v).replace(/[,\s฿]/g, '')));
+      const items = sortedItems(b).filter((i) => b.type === 'CBS' || isLeaf(b, i));
+      return body.map((r) => {
+        const g = (k) => (ix[k] >= 0 && r[ix[k]] != null ? String(r[ix[k]]).trim() : '');
+        const code = g('item');
+        const it = code ? items.find((i) => String(i.code) === code) || items.find((i) => normName(i.name) === normName(code)) : null;
+        return { code, itemId: it ? it.id : '', worker: g('worker'), desc: g('desc'), amount: round2(num(g('amount'))), vat: /^(y|yes|1|true|✓|มี|vat)$/i.test(g('vat')) };
+      });
+    };
+    const normName = (x) => String(x || '').replace(/\s+/g, '').toLowerCase();
+    const addParsed = (list, label) => {
+      const good = list.filter((x) => x.amount > 0 && (x.desc || x.worker));
+      const bad = list.length - good.length;
+      if (!good.length) { msg.textContent = 'ไม่พบรายการที่นำเข้าได้ — ตรวจคอลัมน์จำนวนเงิน / รายละเอียด' + (bad ? ' (ข้าม ' + bad + ' แถว)' : ''); return; }
+      if (tbody.rows.length === 1 && !tbody.rows[0].querySelector('[name="lnDesc"]').value.trim() && !tbody.rows[0].querySelector('[name="lnAmount"]').value) tbody.innerHTML = '';
+      const laborCat = (db.master.expenseCategories || []).find((c) => isLaborText(c.name));
+      good.forEach((x) => {
+        tbody.insertAdjacentHTML('beforeend', document.getElementById('lineTpl').innerHTML);
+        const tr = tbody.rows[tbody.rows.length - 1];
+        const sel = tr.querySelector('[name="lnItem"]');
+        if (sel && x.itemId) sel.value = x.itemId;
+        const cat = tr.querySelector('[name="lnCat"]');
+        if (cat && laborCat && x.worker) cat.value = laborCat.name;
+        tr.querySelector('[name="lnDesc"]').value = x.desc || (x.worker ? 'ค่าแรง' : '');
+        tr.querySelector('[name="lnAmount"]').value = x.amount;
+        tr.querySelector('[name="lnVat"]').checked = x.vat;
+        const w = tr.querySelector('[name="lnWorker"]');
+        if (w) w.value = x.worker;
+      });
+      form.dispatchEvent(new Event('change', { bubbles: true }));
+      const noItem = perLine ? good.filter((x) => !x.itemId).length : 0;
+      msg.textContent = 'เพิ่ม ' + good.length + ' บรรทัดจาก' + label + (noItem ? ' · ' + noItem + ' บรรทัดไม่พบรหัส Item ที่ตรงกัน — เลือกรายการต้นทุนเองในตาราง' : '') + (bad ? ' · ข้าม ' + bad + ' แถวที่จำนวนเงินไม่ถูกต้อง' : '');
+    };
+    document.getElementById('pasteGo').addEventListener('click', () => {
+      const box = document.getElementById('pasteBox');
+      const rows = box.value.split(/\r?\n/).map((l) => l.split('\t'));
+      addParsed(parseLines(rows), 'ข้อมูลที่วาง');
+      if (msg.textContent.startsWith('เพิ่ม')) box.value = '';
+    });
+    document.getElementById('linesFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      try {
+        const rows = /\.csv$/i.test(file.name) ? parseCsv(await file.text()) : await readXlsxRows(await file.arrayBuffer());
+        addParsed(parseLines(rows), 'ไฟล์ ' + file.name);
+      } catch (err) { msg.textContent = 'อ่านไฟล์ไม่ได้: ' + (err.message || err); }
+    });
+    document.getElementById('linesTpl').addEventListener('click', () => {
+      const lab = sortedItems(b).filter((i) => isLeaf(b, i) && isLaborItem(b, i))[0] || sortedItems(b).filter((i) => (b.type === 'CBS' || isLeaf(b, i)) && isLaborItem(b, i))[0] || sortedItems(b).filter((i) => b.type === 'CBS' || isLeaf(b, i))[0] || { code: '' };
+      const cols = [{ h: 'No.Item (รหัส Item)', w: 16 }, { h: 'ชื่อเจ้าหนี้ / คนงาน', w: 28 }, { h: 'รายละเอียด (ถ้ามีจำนวน โปรดระบุให้ชัดเจน)', w: 52 }, { h: 'จำนวนเงิน (ก่อน VAT)', w: 20, num: true }, { h: 'VAT 7% (ใส่ Y ถ้ามี)', w: 18 }];
+      const bytes = buildXlsx([{ name: 'รายการเบิก', cols, rows: [[lab.code, 'นางสมมติ ตัวอย่าง', 'ค่าแรงดูแลกล้า 10/5/2026 @349 บาท', 3490, ''], [lab.code, 'นายสมมติ สองตัวอย่าง', 'ค่าแรงดูแลกล้า 12/5/2026 @349 บาท', 2792, '']] }]);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      a.download = 'request-lines-template.xlsx';
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    });
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       // ทำ Memo เฉพาะเมื่อเข้าเกณฑ์ (ใช้เงินข้ามบริษัทกับ PCC) — นอกนั้นส่งตรงให้ผู้คุมงบ
@@ -3818,7 +3896,7 @@
       const fields = {
         itemId: isCapex ? f.itemId.value : (clean[0] || {}).itemId,
         lines: clean,
-        payee: f.payee.value.trim() || uniq(clean.map((l) => l.worker).filter(Boolean)).join(', '),
+        payee: f.payee.value.trim() || ((names) => (names.length > 3 ? 'คนงาน ' + names.length + ' คน (ดูรายการ)' : names.join(', ')))(uniq(clean.map((l) => l.worker).filter(Boolean))),
         poNo: 'N/A',
         amountBeforeVat: round2(clean.reduce((s, l) => s + l.amountBeforeVat, 0)),
         vat: round2(clean.reduce((s, l) => s + l.vat, 0)),
@@ -4179,7 +4257,7 @@
       fact('PO No.', isCapex && r.useType === 'prpo' ? (hasPO(r) ? esc(r.poNo) : '<span class="muted">' + (r.status === 'approved' ? 'รอจัดซื้อออก PO' : 'ออกหลังผู้คุมงบอนุมัติ') + '</span>')
         : isCapex ? '<span class="muted">ไม่ต้องออก PO</span>' : esc(r.poNo)) +
       (isCapex && (r.useType === 'prpo' || r.useType === 'direct') ? fact('เงื่อนไขการจ่าย', esc(planText(r))) : '') +
-      (isCapex ? fact('วัตถุประสงค์', esc(r.purpose), true) : '') +
+      (isCapex && r.purpose ? fact('วัตถุประสงค์', esc(r.purpose), true) : '') +
       (r.memoBackground ? fact('เรื่องสืบเนื่อง / ความเป็นมา (Memo)', esc(r.memoBackground).replace(/\n/g, '<br>'), true) : '') +
       (r.memo ? fact('Memo', esc(r.memo.no) + '<small><a href="#/request/' + r.id + '/memo' + (canEditMemo(r) ? '' : '?view=1') + '">' + (canEditMemo(r) ? 'กรอก / แก้ไข Memo' : 'เปิด Memo') + '</a></small>') : '') +
       (isCapex && r.requesterReason ? fact('เหตุผลที่ขอเกินงบ (ผู้ขอ)', esc(r.requesterReason), true) : '') +
@@ -4696,7 +4774,7 @@
       tr('ประเภทการใช้งบ', esc((USE_TYPES[r.useType] || {}).label || '-') + '<br><small>' + esc((USE_TYPES[r.useType] || {}).cut || '') + '</small>') +
       tr('วันที่ขอใช้งบ', fmtDay(r.createdAt)) +
       tr('ชื่อผู้ขอใช้งบประมาณ', esc(userName(r.requesterId) + ' · ' + b.department)) +
-      tr('วัตถุประสงค์ในการใช้งบ', esc(r.purpose)) +
+      (r.purpose ? tr('วัตถุประสงค์ในการใช้งบ', esc(r.purpose)) : '') +
       tr(r.useType === 'advance' || r.useType === 'reimburse' ? 'ผู้รับเงิน (พนักงาน)' : 'Supplier (ผู้รับเงิน)', esc(r.payee || '-')) +
       tr('PR / PO No.', poText) +
       (r.overItem > 0 ? tr('หมายเหตุ: ใช้เกินงบรายการ', money(r.overItem) + ' บาท (อยู่ในงบรวมของโครงการ)' + (r.requesterReason ? '<br>เหตุผลผู้ขอ: ' + esc(r.requesterReason) : '')) : '') +
@@ -5967,7 +6045,7 @@
     // ---- ขอเบิกใช้งบ
     const rf = document.getElementById('requestForm');
     if (rf) {
-      markReq(rf, ['itemId', 'purpose']);
+      markReq(rf, (budgetById(rf.dataset.budget) || {}).type === 'CBS' ? ['itemId'] : ['itemId', 'purpose']); // OPEX ไม่บังคับวัตถุประสงค์
       markReqText(rf, '.section-title', /ประเภทการเบิกใช้งบ/);
       markReqText(rf, '.lines-table thead th', /^(รายการต้นทุน \(OPEX\)|รายการย่อย \(Item No\.\)|หมวดค่าใช้จ่าย|รายละเอียด|ก่อน VAT)/);
       markReq(rf, ['memoTo', 'memoApprovers']);
@@ -5976,7 +6054,7 @@
         const m = [];
         if (!f.querySelector('[name="useType"]:checked')) m.push('ประเภทการเบิกใช้งบ');
 
-        if (!filled(e.purpose)) m.push('วัตถุประสงค์');
+        if (!filled(e.purpose) && (budgetById(f.dataset.budget) || {}).type !== 'CBS') m.push('วัตถุประสงค์');
         const hasWorker = Array.from(f.querySelectorAll('#lineRows [name="lnWorker"]')).some((x) => !x.hidden && x.value.trim());
         if (e.payee && e.payee.required && !hasWorker && !filled(e.payee)) m.push('ผู้รับเงิน (หรือชื่อคนงานในบรรทัดค่าแรง)');
         const rows = Array.from(f.querySelectorAll('#lineRows tr')).map((tr) => ({
