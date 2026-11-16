@@ -3483,7 +3483,7 @@
     return '<div class="item-group">' +
       '<div class="item-group-head">' + pick +
       '<button type="button" class="group-del" data-remove-group title="ลบรายการนี้" aria-label="ลบรายการนี้">' + ICON_TRASH + '</button></div>' +
-      (capex ? '<div class="group-purpose"><input name="grpPurpose" value="' + esc(rows.map((l) => l.purpose).find(Boolean) || '') + '" aria-label="วัตถุประสงค์ของรายการนี้" placeholder="วัตถุประสงค์ของรายการนี้ เช่น จัดซื้อเครื่องชั่งสำหรับห้องปฏิบัติการ"></div>' : '') +
+      (capex ? '<label class="field group-purpose req"><span>วัตถุประสงค์ของรายการนี้</span><input name="grpPurpose" required value="' + esc(rows.map((l) => l.purpose).find(Boolean) || '') + '" aria-label="วัตถุประสงค์ของรายการนี้" placeholder="วัตถุประสงค์ของรายการนี้ เช่น จัดซื้อเครื่องชั่งสำหรับห้องปฏิบัติการ"></label>' : '') +
       '<div class="table-wrap"><table class="edit-table group-table">' + GROUP_COLS +
       '<thead><tr><th>No.</th><th data-sup>Supplier</th><th class="req">รายละเอียด</th><th class="num req">จำนวนก่อน VAT</th><th class="center">VAT 7%</th><th class="num">รวม</th><th></th></tr></thead>' +
       '<tbody class="group-rows">' + rows.map((l) => supRow(l, capex)).join('') + '</tbody></table></div>' +
@@ -3544,6 +3544,9 @@
         '<div class="choice choice-4">' + Object.keys(USE_TYPES).map(typeCard).join('') + '</div></section>';
 
     const today = new Date().toISOString().slice(0, 10);
+    // คำขอ CAPEX เดิมที่มีวัตถุประสงค์ระดับใบ (ยังไม่แยกรายกลุ่ม): ใช้เป็นวัตถุประสงค์ตั้งต้นของทุกกลุ่ม
+    const oldSrc = existing || dup;
+    const oldPurpose = (ls) => (b.type === 'CAPEX' && oldSrc && oldSrc.purpose ? ls.map((l) => (l.purpose ? l : Object.assign({}, l, { purpose: oldSrc.purpose }))) : ls);
     const projRemain = round2(usage(b).remaining + projOwn);
     const itemsCard = '<section class="card form-section">' +
       step(2, 'ข้อมูลการดำเนินการ', '<button type="button" class="btn" id="addGroup">+ เพิ่มรายการใหม่</button>') +
@@ -3552,7 +3555,7 @@
         field('วันที่กำหนดจ่ายเงิน', '<input type="date" name="payDueDate" required value="' + esc((existing && existing.payDueDate) || today) + '">') + '</div>' +
       (isProject ? '<input type="hidden" name="itemId" value="' + esc(b.items[0].id) + '" data-remaining="' + projRemain + '">' +
         '<p class="group-note">งบรวมทั้งโครงการ ' + esc(b.code) + ' — คงเหลือ <strong>' + money(projRemain) + '</strong> บาท · แต่ละกลุ่มเลือกหมวดค่าใช้จ่าย และบริษัทที่ลงทุน</p>' : '') +
-      '<div class="groups-box"><div id="itemGroups">' + groupLines(b, lines).map((g) => itemGroup(b, existing, g.key, g.rows)).join('') + '</div>' +
+      '<div class="groups-box"><div id="itemGroups">' + groupLines(b, oldPurpose(lines)).map((g) => itemGroup(b, existing, g.key, g.rows)).join('') + '</div>' +
       '<div class="table-wrap group-sum"><table class="edit-table group-table">' + GROUP_COLS +
       '<tbody><tr><td colspan="3" class="right"><strong>รวม</strong></td><td class="num"><strong id="sumBefore">0.00</strong></td><td class="num"><strong id="sumVat">0.00</strong></td><td class="num"><strong id="sumTotal">0.00</strong></td><td></td></tr></tbody></table></div></div>' +
       '<template id="groupTpl">' + itemGroup(b, existing, {}, [{}]) + '</template><template id="supRowTpl">' + supRow({}, b.type === 'CAPEX') + '</template>' +
@@ -3897,6 +3900,7 @@
         if (!l.description) errors.push(no + 'กรุณาระบุรายการ');
         if (!(l.amountBeforeVat > 0)) errors.push(no + 'จำนวนเงินต้องมากกว่า 0');
         if (l.supplier !== undefined && useType() !== 'prpo' && !l.supplier) errors.push(no + 'กรุณาระบุ Supplier');
+        if (rowField(l.tr, 'grpPurpose') && !l.purpose) errors.push(no + 'กรุณาระบุวัตถุประสงค์ของรายการ');
       });
       const plan = useType() === 'prpo' || useType() === 'direct' ? readPlan(form) : { mode: 'single', installments: [] };
       if (plan && plan.mode === 'installments') {
@@ -6092,7 +6096,7 @@
         if (e.payDueDate && !filled(e.payDueDate)) m.push('วันที่กำหนดจ่ายเงิน');
         const rows = lineTrs(f).map((tr) => ({
           desc: filled(tr.querySelector('[name="lnDesc"]')), amt: Number(tr.querySelector('[name="lnAmount"]').value || 0),
-          item: rowItemSel(tr), cat: rowField(tr, 'lnCat'), sup: tr.querySelector('[name="lnSupplier"]')
+          item: rowItemSel(tr), cat: rowField(tr, 'lnCat'), sup: tr.querySelector('[name="lnSupplier"]'), purp: rowField(tr, 'grpPurpose')
         }));
         const used = rows.filter((r) => r.desc || r.amt);
         if (!used.length) m.push('รายการที่ขอใช้อย่างน้อย 1 บรรทัด');
@@ -6101,6 +6105,7 @@
         const rb = budgetById(f.dataset.budget) || {};
         if ((used.length ? used : rows).some((r) => r.item && !r.item.value)) m.push(rb.type === 'CAPEX' ? 'รายการย่อย (Item No.) ทุกบรรทัด' : 'รายการต้นทุนทุกบรรทัด');
         if (used.some((r) => r.cat && !r.cat.value)) m.push('หมวดค่าใช้จ่ายทุกบรรทัด');
+        if (used.some((r) => r.purp && !filled(r.purp))) m.push('วัตถุประสงค์ทุกรายการ');
         if (used.some((r) => r.sup && (!filled(r.sup) || r.sup.value === SUP_NEW)) && (f.querySelector('[name="useType"]:checked') || {}).value !== 'prpo') m.push('Supplier ทุกบรรทัด');
         const wrap = document.getElementById('planWrap');
         const mode = f.querySelector('[name="payMode"]:checked');
