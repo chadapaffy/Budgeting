@@ -1103,10 +1103,13 @@ button.link { color: var(--brand); }
 .req-form .lines-table:not(.plan-table) { table-layout: fixed; min-width: 780px; }
 /* ---- ฟอร์มขอเบิก OPEX: กลุ่มตาม Item */
 .section-sub { margin-top: var(--s-1); font-size: var(--fs-sm); color: var(--muted); }
-.item-group { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--s-3); margin-bottom: var(--s-3); background: var(--surface); }
-.item-group-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-3); }
+.req-dates { margin-bottom: var(--s-4); }
+.groups-box { border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
+.item-group { background: var(--surface); }
+.item-group + .item-group { border-top: 6px solid var(--surface-2); }
+.item-group-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); padding: var(--s-2); }
 .item-group-head .select-wrap { flex: 0 1 420px; min-width: 0; }
-.item-group .table-wrap, .group-sum { box-shadow: none; }
+.groups-box .table-wrap { border: 0; border-radius: 0; box-shadow: none; }
 .group-table { table-layout: fixed; width: 100%; }
 .group-table .c-no { width: 2.25rem; }
 .group-table .c-amt { width: 7rem; }
@@ -1117,18 +1120,20 @@ button.link { color: var(--brand); }
 .group-table td { padding: var(--s-1) var(--s-2); }
 .group-table input:not([type="checkbox"]), .group-table select { width: 100%; }
 .group-sum td { background: var(--surface-2); }
-.link-add { margin-top: var(--s-2); background: none; border: 0; padding: var(--s-1) var(--s-2); color: var(--primary); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; border-radius: var(--radius-sm); }
+.link-add { margin: 0 0 var(--s-1) calc(2.25rem - var(--s-2)); background: none; border: 0; padding: var(--s-1) var(--s-2); color: var(--primary); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; border-radius: var(--radius-sm); }
 .link-add:hover { background: var(--primary-soft); }
-.row-x { background: none; border: 0; padding: 0 var(--s-1); color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; border-radius: var(--radius-sm); }
+.row-x { width: 24px; height: 24px; background: var(--surface-2); border: 0; padding: 0; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; border-radius: var(--radius-sm); }
 .row-x:hover { color: var(--danger); background: var(--bad-bg); }
-.req-meta { margin-top: var(--s-4); grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); align-items: start; }
+.req-meta { margin-top: var(--s-4); }
 .attach-box { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); padding: var(--s-3); border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); }
 .attach-box #reqFiles { color: var(--muted); font-size: var(--fs-sm); }
 .total-card .side-title { margin-bottom: var(--s-2); }
 .total-card .guard-hint { margin: var(--s-3) 0 0; padding: var(--s-2) var(--s-3); border-radius: var(--radius-sm); background: var(--warn-bg); color: var(--warn); }
 .form-tip .tip-head { margin: 0 0 var(--s-1); font-weight: 600; font-size: var(--fs-sm); }
 .form-tip .tip-head + .muted { margin-top: 0; }
-@media (max-width: 720px) { .req-meta { grid-template-columns: minmax(0, 1fr); } .item-group .group-table, .group-sum .group-table { min-width: 560px; } }
-.group-sum { margin: 0 calc(var(--s-3) + 1px); }
+@media (max-width: 720px) { .item-group .group-table, .group-sum .group-table { min-width: 560px; } }
 .form-tip .muted + .tip-head { margin-top: var(--s-3); }
 .attach-box #reqFiles > * { margin: 0; }
+.group-del { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: var(--danger); color: var(--surface); cursor: pointer; flex: none; }
+.group-del:hover { opacity: .85; }
+.group-del svg { width: 15px; height: 15px; }

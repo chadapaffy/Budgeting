@@ -3233,10 +3233,10 @@
       S('GL Code', 10), S('GL Name', 20), { h: 'จำนวน', w: 9, num: true }, S('หน่วย', 8), N('ก่อน VAT'), N('VAT'), N('งบ (รวม VAT)'), N('ตัดงบแล้ว'), N('จองไว้'), N('คงเหลือ'), S('หมายเหตุ', 20)], itemRows);
 
     add('requests', [S('เลขที่คำขอ', 15), S('เลขที่เอกสาร', 16), S('เลขที่ Memo', 16), S('บริษัท', 8), S('ประเภทงบ', 9), S('รหัสโครงการ'), S('ประเภทการใช้งบ', 22), S('สถานะ', 20),
-      S('ผู้ขอ', 16), S('วันที่ขอ', 11), S('วันที่เบิก', 11), S('วันที่อนุมัติ', 11), S('วัตถุประสงค์', 34), S('Supplier / ผู้รับเงิน', 22), S('PO No.', 14), N('ก่อน VAT'), N('VAT'), N('รวม'),
+      S('ผู้ขอ', 16), S('วันที่ขอ', 11), S('วันที่ส่งมอบ/วางบิล', 13), S('วันที่กำหนดจ่ายเงิน', 13), S('วันที่อนุมัติ', 11), S('วัตถุประสงค์', 34), S('Supplier / ผู้รับเงิน', 22), S('PO No.', 14), N('ก่อน VAT'), N('VAT'), N('รวม'),
       N('ตัดงบแล้ว'), N('ปิดยอด: ใช้จริง'), N('ปิดยอด: คืนงบ'), S('วันที่ปิดยอด', 11), S('Note ผู้คุมงบ', 24)],
     reqs.map((r) => { const b = budgetById(r.budgetId); return [r.no, r.docNo || '', (r.memo || {}).no || '', b.company, T(r.type), b.code, (USE_TYPES[r.useType] || {}).label || '', STATUS_LABEL[r.status] || r.status,
-      userName(r.requesterId), day(r.createdAt), r.requestDate || '', day(r.approvedAt), r.purpose || '', r.payee || '', r.poNo && r.poNo !== 'N/A' ? r.poNo : '', r.amountBeforeVat, r.vat, r.amount,
+      userName(r.requesterId), day(r.createdAt), r.deliveryDate || '', r.payDueDate || '', day(r.approvedAt), r.purpose || '', r.payee || '', r.poNo && r.poNo !== 'N/A' ? r.poNo : '', r.amountBeforeVat, r.vat, r.amount,
       cutTotal(r), r.closed ? r.closed.actual : '', r.closed ? r.closed.returned : '', r.closed ? day(r.closed.at) : '', r.approverNote || '']; }));
 
     const lineRows = [];
@@ -3481,7 +3481,7 @@
     return '<div class="item-group">' +
       '<div class="item-group-head"><div class="select-wrap"><select name="lnItem" aria-label="รายการต้นทุน (Item)"><option value="">— เลือก Item —</option>' +
       itemOptions(b, existing, itemId, false) + '</select></div>' +
-      '<button type="button" class="btn small bad" data-remove-group title="ลบรายการนี้" aria-label="ลบรายการนี้">' + ICON_TRASH + '</button></div>' +
+      '<button type="button" class="group-del" data-remove-group title="ลบรายการนี้" aria-label="ลบรายการนี้">' + ICON_TRASH + '</button></div>' +
       '<div class="table-wrap"><table class="edit-table group-table">' + GROUP_COLS +
       '<thead><tr><th>No.</th><th data-sup>Supplier</th><th class="req">รายละเอียด</th><th class="num req">จำนวนก่อน VAT</th><th class="center">VAT 7%</th><th class="num">รวม</th><th></th></tr></thead>' +
       '<tbody class="group-rows">' + rows.map(supRow).join('') + '</tbody></table></div>' +
@@ -3552,12 +3552,14 @@
     const today = new Date().toISOString().slice(0, 10);
     const opexCard = '<section class="card form-section">' +
       step(2, 'ข้อมูลการดำเนินการ', '<button type="button" class="btn" id="addGroup">+ เพิ่มรายการใหม่</button>') +
-      '<div id="itemGroups">' + groupLines(lines).map((g) => itemGroup(b, existing, g.itemId, g.rows)).join('') + '</div>' +
+      '<div class="form-grid req-dates">' +
+        field('วันที่ส่งมอบ/วางบิล', '<input type="date" name="deliveryDate" required value="' + esc((existing && existing.deliveryDate) || today) + '">') +
+        field('วันที่กำหนดจ่ายเงิน', '<input type="date" name="payDueDate" required value="' + esc((existing && existing.payDueDate) || today) + '">') + '</div>' +
+      '<div class="groups-box"><div id="itemGroups">' + groupLines(lines).map((g) => itemGroup(b, existing, g.itemId, g.rows)).join('') + '</div>' +
       '<div class="table-wrap group-sum"><table class="edit-table group-table">' + GROUP_COLS +
-      '<tbody><tr><td colspan="3" class="right"><strong>รวม</strong></td><td class="num" id="sumBefore">0.00</td><td class="num" id="sumVat">0.00</td><td class="num"><strong id="sumTotal">0.00</strong></td><td></td></tr></tbody></table></div>' +
+      '<tbody><tr><td colspan="3" class="right"><strong>รวม</strong></td><td class="num"><strong id="sumBefore">0.00</strong></td><td class="num"><strong id="sumVat">0.00</strong></td><td class="num"><strong id="sumTotal">0.00</strong></td><td></td></tr></tbody></table></div></div>' +
       '<template id="groupTpl">' + itemGroup(b, existing, '', [{}]) + '</template><template id="supRowTpl">' + supRow({}) + '</template>' +
-      '<div class="form-grid req-meta">' + field('วันที่เบิก', '<input type="date" name="reqDate" required value="' + esc((existing && existing.requestDate) || today) + '">') +
-      '<div class="field"><span>เอกสารประกอบ</span><div class="attach-box"><label class="btn small file-btn">+ แนบไฟล์<input type="file" id="reqFileInput" accept="application/pdf,image/png,image/jpeg" multiple hidden></label>' +
+      '<div class="req-meta"><div class="field"><span>เอกสารประกอบ</span><div class="attach-box"><label class="btn small file-btn">+ แนบไฟล์<input type="file" id="reqFileInput" accept="application/pdf,image/png,image/jpeg" multiple hidden></label>' +
       '<div id="reqFiles">' + attachList(v.attachments, { del: true, empty: 'ยังไม่มีไฟล์แนบ' }) + '</div></div></div></div>' +
       '<div id="overBudget" hidden>' +
       '<div class="alert warn" id="overText"></div>' +
@@ -3924,7 +3926,8 @@
       if (!useType()) errors.push('กรุณาเลือกประเภทการเบิกใช้งบ');
       if (f.payee && f.payee.required && !f.payee.value.trim()) errors.push('กรุณาระบุผู้รับเงิน');
       if (!lines.length) errors.push('กรุณาใส่รายการที่ขอเบิกอย่างน้อย 1 บรรทัด');
-      if (f.reqDate && !f.reqDate.value) errors.push('กรุณาระบุวันที่เบิก');
+      if (f.deliveryDate && !f.deliveryDate.value) errors.push('กรุณาระบุวันที่ส่งมอบ/วางบิล');
+      if (f.payDueDate && !f.payDueDate.value) errors.push('กรุณาระบุวันที่กำหนดจ่ายเงิน');
       lines.forEach((l, i) => {
         const no = 'บรรทัดที่ ' + (lineTrs(form).indexOf(l.tr) + 1) + ': ';
         if (perLine && !l.itemId) errors.push(no + (b.type === 'CAPEX' ? 'กรุณาเลือกรายการย่อย (Item No.)' : 'กรุณาเลือกรายการต้นทุน'));
@@ -3955,7 +3958,8 @@
         amount: round2(clean.reduce((s, l) => s + l.amount, 0))
       };
       fields.purpose = f.purpose ? f.purpose.value.trim() : '';
-      if (f.reqDate) fields.requestDate = f.reqDate.value;
+      if (f.deliveryDate) fields.deliveryDate = f.deliveryDate.value;
+      if (f.payDueDate) fields.payDueDate = f.payDueDate.value;
       clean.forEach((l) => { if (l.supplier) rememberSupplier(l.supplier); });
       fields.memoBackground = f.memoBackground ? f.memoBackground.value.trim() : '';
       fields.useType = useType();
@@ -4312,6 +4316,8 @@
       fact('PO No.', isCapex && r.useType === 'prpo' ? (hasPO(r) ? esc(r.poNo) : '<span class="muted">' + (r.status === 'approved' ? 'รอจัดซื้อออก PO' : 'ออกหลังผู้คุมงบอนุมัติ') + '</span>')
         : isCapex ? '<span class="muted">ไม่ต้องออก PO</span>' : esc(r.poNo)) +
       (isCapex && (r.useType === 'prpo' || r.useType === 'direct') ? fact('เงื่อนไขการจ่าย', esc(planText(r))) : '') +
+      (r.deliveryDate ? fact('วันที่ส่งมอบ/วางบิล', fmtDay(r.deliveryDate)) : '') +
+      (r.payDueDate ? fact('วันที่กำหนดจ่ายเงิน', fmtDay(r.payDueDate)) : '') +
       (r.requestDate ? fact('วันที่เบิก', fmtDay(r.requestDate)) : '') +
       (isCapex && r.purpose ? fact('วัตถุประสงค์', esc(r.purpose), true) : '') +
       (r.memoBackground ? fact('เรื่องสืบเนื่อง / ความเป็นมา (Memo)', esc(r.memoBackground).replace(/\n/g, '<br>'), true) : '') +
@@ -4830,6 +4836,8 @@
       tr('ประเภทการใช้งบ', esc((USE_TYPES[r.useType] || {}).label || '-') + '<br><small>' + esc((USE_TYPES[r.useType] || {}).cut || '') + '</small>') +
       tr('วันที่ขอใช้งบ', fmtDay(r.createdAt)) +
       tr('ชื่อผู้ขอใช้งบประมาณ', esc(userName(r.requesterId) + ' · ' + b.department)) +
+      (r.deliveryDate ? tr('วันที่ส่งมอบ/วางบิล', fmtDay(r.deliveryDate)) : '') +
+      (r.payDueDate ? tr('วันที่กำหนดจ่ายเงิน', fmtDay(r.payDueDate)) : '') +
       (r.requestDate ? tr('วันที่เบิก', fmtDay(r.requestDate)) : '') +
       (r.purpose ? tr('วัตถุประสงค์ในการใช้งบ', esc(r.purpose)) : '') +
       tr(r.useType === 'advance' || r.useType === 'reimburse' ? 'ผู้รับเงิน (พนักงาน)' : 'Supplier (ผู้รับเงิน)', esc(r.payee || '-')) +
@@ -6107,7 +6115,7 @@
     // ---- ขอเบิกใช้งบ
     const rf = document.getElementById('requestForm');
     if (rf) {
-      markReq(rf, (budgetById(rf.dataset.budget) || {}).type === 'CBS' ? ['itemId', 'reqDate'] : ['itemId', 'purpose']); // OPEX ไม่มีวัตถุประสงค์ แต่ต้องมีวันที่เบิก
+      markReq(rf, (budgetById(rf.dataset.budget) || {}).type === 'CBS' ? ['itemId', 'deliveryDate', 'payDueDate'] : ['itemId', 'purpose']); // OPEX ไม่มีวัตถุประสงค์ แต่ต้องมีวันที่ส่งมอบ / กำหนดจ่าย
       markReqText(rf, '.section-title', /ประเภทการเบิกใช้งบ/);
       markReqText(rf, '.lines-table thead th', /^(รายการต้นทุน \(OPEX\)|Supplier และรายละเอียด|รายการย่อย \(Item No\.\)|หมวดค่าใช้จ่าย|รายละเอียด|ก่อน VAT)/);
       markReq(rf, ['memoTo', 'memoApprovers']);
@@ -6118,7 +6126,8 @@
 
         if (e.purpose && !filled(e.purpose)) m.push('วัตถุประสงค์');
         if (e.payee && e.payee.required && !filled(e.payee)) m.push('ผู้รับเงิน');
-        if (e.reqDate && !filled(e.reqDate)) m.push('วันที่เบิก');
+        if (e.deliveryDate && !filled(e.deliveryDate)) m.push('วันที่ส่งมอบ/วางบิล');
+        if (e.payDueDate && !filled(e.payDueDate)) m.push('วันที่กำหนดจ่ายเงิน');
         const rows = lineTrs(f).map((tr) => ({
           desc: filled(tr.querySelector('[name="lnDesc"]')), amt: Number(tr.querySelector('[name="lnAmount"]').value || 0),
           item: rowItemSel(tr), cat: tr.querySelector('[name="lnCat"]'), sup: tr.querySelector('[name="lnSupplier"]')
