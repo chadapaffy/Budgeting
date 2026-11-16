@@ -1,4 +1,4 @@
-# ProcurementSystem
+# Budgeting — ระบบขอเบิกใช้งบประมาณ
 
 ## ต้นแบบเวอร์ชันใหม่ (v2) — หน้าหลัก `index.html`
 
