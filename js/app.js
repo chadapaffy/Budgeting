@@ -1294,7 +1294,7 @@
     const copyId = params && params.get ? params.get('copy') : '';
     const copySrc = copyList.find((x) => x.id === copyId) || null;
     const v = b || (copySrc ? {
-      type: 'CBS', structure: 'items', company: copySrc.company, fiscalYear: copySrc.fiscalYear, group: copySrc.group || '', code: '', parentCode: '', name: copySrc.name,
+      type: 'CBS', structure: copySrc.structure || 'items', company: copySrc.company, fiscalYear: copySrc.fiscalYear, group: copySrc.group || '', code: '', parentCode: '', name: copySrc.name,
       department: copySrc.department || '', ownerId: u.id, note: copySrc.note || '', listGroup: copySrc.listGroup || '', priorityGroup: copySrc.priorityGroup || '', priorityReason: copySrc.priorityReason || '', financeOwner: copySrc.financeOwner || '', status: 'Plan', startDate: '', endDate: '', production: {},
       // คัดลอกเฉพาะ Item หลัก (รหัส ชื่อ วงเงิน VAT GL) — Item ย่อยและข้อมูลการอนุมัติไม่ติดไป
       items: copySrc.items.filter((it) => depth(it) === 0).map((it) => ({ code: it.code, name: it.name, qty: '', unit: '', amount: it.amount, vat: it.vat || 0, glCode: it.glCode || '', glName: it.glName || '' }))
@@ -1371,8 +1371,8 @@
           field('ผู้บริหารที่อนุมัติ (OPEX)', '<input name="meetingBy" placeholder="ชื่อ / ตำแหน่ง" value="' + esc((v.meeting || {}).by || '') + '">', ' data-for="CBS"') + '</div>'
         : '') +
 
-      '<fieldset data-for="CAPEX"><legend>โครงสร้างงบ</legend><div class="choice">' +
-      radio('items', 'แยกรายการย่อย', 'คุมวงเงินรายรายการ เหมาะกับงบที่รู้รายละเอียดแล้ว') +
+      '<fieldset><legend>โครงสร้างงบ</legend><div class="choice">' +
+      radio('items', dual('แยกรายการย่อย', 'แยก Item'), 'คุมวงเงินรายรายการ เหมาะกับงบที่รู้รายละเอียดแล้ว') +
       radio('project', 'งบรวมทั้งโครงการ', 'ยังไม่แยกรายการ — ตอนใช้งบเลือกหมวดค่าใช้จ่ายแทน คุมวงเงินที่ระดับโครงการ') + '</div>' +
       '<div class="row" data-structure="project">' +
       field('วงเงินรวมทั้งโครงการ (รวม VAT)', '<input name="projAmount" type="number" min="0" step="0.01" class="right" value="' + esc(projItem.amount || '') + '">') +
@@ -1432,12 +1432,12 @@
       form.querySelector('[data-total="cbs"]').textContent = money(cbs);
       const gt = document.getElementById('govTotal');
       if (gt) {
-        const st = curType() === 'CBS' ? 'items' : (form.querySelector('[name="structure"]:checked') || {}).value;
-        gt.textContent = money(curType() === 'CBS' ? cbs : st === 'project' ? Number(form.elements.projAmount.value || 0) : capex);
+        const st = (form.querySelector('[name="structure"]:checked') || {}).value;
+        gt.textContent = money(st === 'project' ? Number(form.elements.projAmount.value || 0) : curType() === 'CBS' ? cbs : capex);
       }
     };
-    // งบ OPEX ต้องแยก Item เสมอ (ไม่มีงบรวมทั้งโครงการ)
-    const curStructure = () => (curType() === 'CBS' ? 'items' : form.querySelector('[name="structure"]:checked').value);
+    // CAPEX / OPEX: แยกรายการ หรือ งบรวมทั้งโครงการ (ของบโดยยังไม่มีรายละเอียด Item)
+    const curStructure = () => form.querySelector('[name="structure"]:checked').value;
     const sync = () => {
       const t = curType();
       const st = curStructure();
@@ -1532,8 +1532,7 @@
       if (dup.length) errors.push('รหัสรายการซ้ำ: ' + uniq(dup).join(', '));
       const draft = { type, items };
       if (type === 'CBS') {
-        if (structure !== 'items') errors.push('งบ OPEX ต้องแยก Item');
-        if (items.some((it) => String(it.code).includes('.'))) errors.push('Item หลักใช้รหัสไม่มีจุด (เช่น 1, 2, 3) — Item ย่อย (1.1) เพิ่มได้ภายหลังเมื่องบเปิดใช้แล้ว');
+        if (structure === 'items' && items.some((it) => String(it.code).includes('.'))) errors.push('Item หลักใช้รหัสไม่มีจุด (เช่น 1, 2, 3) — Item ย่อย (1.1) เพิ่มได้ภายหลังเมื่องบเปิดใช้แล้ว');
       } else {
         // CAPEX: รายการแม่ (ถ้าใช้รหัสมีจุด) ไม่มีวงเงินของตัวเอง
         items.forEach((it) => { if (!isLeaf(draft, it)) { it.amount = 0; it.vat = 0; it.qty = ''; } });
@@ -3089,7 +3088,7 @@
       ['หัวตารางอยู่แถวที่ 3 ข้อมูลเริ่มแถวที่ 4 (ระบบหาแถวหัวตารางจาก "Capex ID" / "Opex ID" ให้เอง) · แถวที่ไม่มี ID (เช่น แถวรวม) จะถูกข้าม'],
       ['นำเข้าเฉพาะแถวที่ "สถานะอนุมัติ" = "' + GOV_APPROVED + '" · แถวอื่นถูกข้าม และแจ้งในหน้าตรวจข้อมูล'],
       ['แผ่น "สรุปโปรเจ็ค" (ถ้ามี) ใช้อ่าน "กลุ่มรายการ" ของแต่ละ ID · ตาราง Pivot ด้านขวาไม่ถูกนำเข้า'],
-      ['มูลค่า = วงเงินรวมต่อโครงการ (ไม่แยก Item) · CAPEX นำเข้าเป็น "งบรวมทั้งโครงการ" · OPEX นำเข้าเป็น Item หลักเดียว'],
+      ['มูลค่า = วงเงินรวมต่อโครงการ (ไม่แยก Item) · CAPEX นำเข้าเป็น "งบรวมทั้งโครงการ" · OPEX ก็นำเข้าเป็น "งบรวมทั้งโครงการ" เช่นกัน (ไม่มีรายละเอียด Item)'],
       ['Owner / ชื่อเจ้าของ: ถ้าตรงกับชื่อผู้ใช้ในระบบจะผูกให้อัตโนมัติ ถ้าไม่ตรงจะเก็บเป็นชื่อตามไฟล์ แล้วผู้คุมงบเลือกผู้ใช้ที่หน้าแก้ไขงบ'],
       ['หลัง Import งบอยู่สถานะ "ยังไม่เปิดใช้งบ" — Business ขอดำเนินการใช้งบ (CAPEX: ผู้คุมงบยืนยัน · OPEX: เปิดใช้ทันที)']
     ];
@@ -3185,12 +3184,11 @@
         else if (!owner) warnings.push('ยังไม่พบผู้ใช้ชื่อ "' + ownerRaw + '" ในระบบ — เก็บเป็นชื่อตามไฟล์ (ผู้คุมงบผูกกับผู้ใช้ได้ที่หน้าแก้ไขงบ)');
         const fy = asYear(get(r, 'year'));
         if (!fy) warnings.push('ไม่พบปีงบประมาณ — ใช้ปี ' + (new Date().getFullYear() + 1));
-        const item = type === 'CAPEX'
-          ? { id: '', code: code || '-', name: 'งบรวมทั้งโครงการ', amount, vat: 0, qty: '', unit: '', glCode: '', glName: '', assetType: assetTypeList()[0] || '' }
-          : { id: '', code: '1', name: 'รวมทั้งโครงการ', amount, vat: 0, qty: '', unit: '', glCode: '', glName: '' };
+        const item = Object.assign({ id: '', code: code || '-', name: 'งบรวมทั้งโครงการ', amount, vat: 0, qty: '', unit: '', glCode: '', glName: '' },
+          type === 'CAPEX' ? { assetType: assetTypeList()[0] || '' } : {});
         const data = {
           type, code, name, company, fiscalYear: fy || new Date().getFullYear() + 1, group: '', department: dept,
-          ownerId: owner ? owner.id : '', ownerName: owner ? '' : ownerRaw, structure: type === 'CAPEX' ? 'project' : 'items', note: '', items: [item],
+          ownerId: owner ? owner.id : '', ownerName: owner ? '' : ownerRaw, structure: 'project', note: '', items: [item],
           listGroup: groupOf[code] || '', priorityGroup: get(r, 'prio'), investGroup: type === 'CAPEX' ? get(r, 'invest') : '',
           priorityReason: get(r, 'reason'), financeOwner: get(r, 'fin'), meeting: { date: '', no: '', note: '', by: '' }
         };
@@ -3346,7 +3344,14 @@
     return { code: '', name: '', own: false };
   }
   /** GL ของบรรทัด: ที่บันทึกในบรรทัด หรือ GL ปัจจุบันของ Item (บัญชีใส่ทีหลัง) */
-  const lineGl = (b, l) => (l.glCode ? { code: l.glCode, name: l.glName || '' } : itemGl(b, itemById(b, l.itemId) || { code: '' }));
+  /** GL ตั้งต้นของหมวดค่าใช้จ่าย (ข้อมูลหลัก) */
+  const categoryGl = (name) => {
+    const c = (db.master.expenseCategories || []).find((x) => x.name === name);
+    const code = c && c.gl ? c.gl : '';
+    return { code, name: code ? ((db.master.glCodes.find((g) => g.code === code) || {}).name || name) : '' };
+  };
+  const lineGl = (b, l) => (l.glCode ? { code: l.glCode, name: l.glName || '' }
+    : b.structure === 'project' && l.category ? categoryGl(l.category) : itemGl(b, itemById(b, l.itemId) || { code: '' }));
   /** Item หลักของ OPEX ที่ยังไม่มี GL */
   const missingGl = (b) => (b.type === 'CBS' && b.structure !== 'project' ? b.items.filter((it) => isMainItem(b, it) && !it.glCode) : []);
   /** ฝ่ายบัญชี (ผู้คุมงบ) ใส่ / แก้ GL ได้ทุกเมื่อ ยกเว้นงบที่ยกเลิก */
@@ -3477,7 +3482,7 @@
     const pick = b.structure === 'project'
       ? '<div class="group-pick"><div class="select-wrap"><select name="lnCat" aria-label="หมวดค่าใช้จ่าย"><option value="">— เลือกหมวดค่าใช้จ่าย —</option>' +
         optList(db.master.expenseCategories, 'name', (c) => c.name, key.category || '') + '</select></div>' +
-        '<label class="group-inv"><span>บริษัทที่ลงทุน</span>' + investorSelect('lnInv', key.investor || b.company) + '</label></div>'
+        (capex ? '<label class="group-inv"><span>บริษัทที่ลงทุน</span>' + investorSelect('lnInv', key.investor || b.company) + '</label>' : '') + '</div>'
       : '<div class="select-wrap"><select name="lnItem" aria-label="' + (capex ? 'รายการย่อย (Item No.)' : 'รายการต้นทุน (Item)') + '"><option value="">— เลือก Item —</option>' +
         itemOptions(b, existing, key.itemId || '', false) + '</select></div>';
     return '<div class="item-group">' +
@@ -3554,7 +3559,7 @@
         field('วันที่ส่งมอบ/วางบิล', '<input type="date" name="deliveryDate" required value="' + esc((existing && existing.deliveryDate) || today) + '">') +
         field('วันที่กำหนดจ่ายเงิน', '<input type="date" name="payDueDate" required value="' + esc((existing && existing.payDueDate) || today) + '">') + '</div>' +
       (isProject ? '<input type="hidden" name="itemId" value="' + esc(b.items[0].id) + '" data-remaining="' + projRemain + '">' +
-        '<p class="group-note">งบรวมทั้งโครงการ ' + esc(b.code) + ' — คงเหลือ <strong>' + money(projRemain) + '</strong> บาท · แต่ละกลุ่มเลือกหมวดค่าใช้จ่าย และบริษัทที่ลงทุน</p>' : '') +
+        '<p class="group-note">งบรวมทั้งโครงการ ' + esc(b.code) + ' — คงเหลือ <strong>' + money(projRemain) + '</strong> บาท · แต่ละกลุ่มเลือกหมวดค่าใช้จ่าย' + (opex ? '' : ' และบริษัทที่ลงทุน') + '</p>' : '') +
       '<div class="groups-box"><div id="itemGroups">' + groupLines(b, oldPurpose(lines)).map((g) => itemGroup(b, existing, g.key, g.rows)).join('') + '</div>' +
       '<div class="table-wrap group-sum"><table class="edit-table group-table">' + GROUP_COLS +
       '<tbody><tr><td colspan="3" class="right"><strong>รวม</strong></td><td class="num"><strong id="sumBefore">0.00</strong></td><td class="num"><strong id="sumVat">0.00</strong></td><td class="num"><strong id="sumTotal">0.00</strong></td><td></td></tr></tbody></table></div></div>' +
@@ -3579,7 +3584,8 @@
         (existing && existing.memo && existing.memo.no ? '<br>Memo เดิมเลขที่ ' + esc(existing.memo.no) + ' — แก้ไขแล้วต้องให้ผู้บริหารเซ็นใหม่' : '') + '</p></div>' : '</div>') +
       '<div class="card form-tip"><h3 class="side-title">คำแนะนำในการเบิก</h3><p class="tip-head">กรณีขอเกินงบประมาณ</p><p class="muted">ขอเกินงบรายการได้ โดยผู้คุมงบต้องใส่ Note · หากยอดเกินงบรวมโครงการ ผู้คุมงบจะพิจารณาโยกงบให้ หรือให้ขอเพิ่มงบ</p>' +
         '<p class="tip-head">หลาย Supplier ในรายการเดียว</p><p class="muted">กด "+ เพิ่ม Supplier" ใต้รายการ' + (opex ? ' เช่น ค่าแรงคนงานหลายคน' : '') + ' · Supplier ใหม่เลือก "+ เพิ่มชื่อใหม่…" ในช่อง Supplier</p>' +
-        (isProject ? '<p class="tip-head">งบรวมทั้งโครงการ</p><p class="muted">ไม่มี Item ให้เลือก — แต่ละกลุ่มเลือกหมวดค่าใช้จ่าย และบริษัทที่ลงทุน (ใช้เงินข้ามบริษัทกับ PCC ต้องทำ Memo ให้ผู้บริหารเซ็นก่อนส่ง)</p>' : '') + '</div>';
+        (isProject ? '<p class="tip-head">งบรวมทั้งโครงการ</p><p class="muted">ไม่มี Item ให้เลือก — แต่ละกลุ่มเลือกหมวดค่าใช้จ่าย' +
+          (opex ? ' (GL ตามหมวดค่าใช้จ่ายในข้อมูลหลัก)' : ' และบริษัทที่ลงทุน (ใช้เงินข้ามบริษัทกับ PCC ต้องทำ Memo ให้ผู้บริหารเซ็นก่อนส่ง)') + '</p>' : '') + '</div>';
 
     return '<div class="page-head"><div><h1>' + (existing ? 'แก้ไขคำขอ ' + esc(existing.no) : 'ขอเบิกใช้งบ') + '</h1>' +
       '<div class="page-sub">' + badge(b.type, TYPE_SHORT[b.type]) + ' ' + esc(b.code + ' ' + b.name) + '</div></div>' +
@@ -3980,9 +3986,9 @@
     r.approvedAt = at;
     r.docNo = nextDocNo(r, b, at);
     if (r.type === 'CBS') {
-      // GL ตั้งต้นจากรายการต้นทุน
+      // GL ตั้งต้นจากรายการต้นทุน (งบรวมทั้งโครงการ: จากหมวดค่าใช้จ่าย)
       r.lines.forEach((l) => {
-        const g = itemGl(b, itemById(b, l.itemId) || { code: '' });
+        const g = lineGl(b, Object.assign({}, l, { glCode: '' }));
         l.glCode = g.code;
         l.glName = g.name;
       });
@@ -6038,7 +6044,7 @@
         if (!filled(e.fiscalYear)) m.push(e.type.value === 'CBS' ? 'ปีงบประมาณ' : 'เฉลี่ยปีที่ลงทุน');
         if (f.dataset.mode === 'setup' && !filled(e.ownerId)) m.push('Owner (Business เจ้าของงบ)');
         const type = e.type.value;
-        const structure = type === 'CBS' ? 'items' : (f.querySelector('[name="structure"]:checked') || {}).value;
+        const structure = (f.querySelector('[name="structure"]:checked') || {}).value;
         if (structure === 'project') {
           if (!(Number(e.projAmount.value) > 0)) m.push('วงเงินรวมทั้งโครงการ');
         } else {
