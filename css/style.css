@@ -1100,5 +1100,35 @@ button.link { color: var(--brand); }
 /* ---- ช่องข้อมูลตามไฟล์ Governance (การจัดลำดับความสำคัญ) */
 .prio-set { margin-bottom: var(--s-4); }
 .prio-set textarea { min-height: 64px; }
-.lines-table td input + input { margin-top: var(--s-2); }
 .req-form .lines-table:not(.plan-table) { table-layout: fixed; min-width: 780px; }
+/* ---- ฟอร์มขอเบิก OPEX: กลุ่มตาม Item */
+.section-sub { margin-top: var(--s-1); font-size: var(--fs-sm); color: var(--muted); }
+.item-group { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--s-3); margin-bottom: var(--s-3); background: var(--surface); }
+.item-group-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-3); }
+.item-group-head .select-wrap { flex: 0 1 420px; min-width: 0; }
+.item-group .table-wrap, .group-sum { box-shadow: none; }
+.group-table { table-layout: fixed; width: 100%; }
+.group-table .c-no { width: 2.25rem; }
+.group-table .c-amt { width: 7rem; }
+.group-table .c-vat { width: 3.5rem; }
+.group-table .c-tot { width: 5.75rem; }
+.group-table .c-del { width: 2rem; }
+.group-table th { font-size: var(--fs-xs); background: var(--surface-2); }
+.group-table td { padding: var(--s-1) var(--s-2); }
+.group-table input:not([type="checkbox"]), .group-table select { width: 100%; }
+.group-sum td { background: var(--surface-2); }
+.link-add { margin-top: var(--s-2); background: none; border: 0; padding: var(--s-1) var(--s-2); color: var(--primary); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; border-radius: var(--radius-sm); }
+.link-add:hover { background: var(--primary-soft); }
+.row-x { background: none; border: 0; padding: 0 var(--s-1); color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; border-radius: var(--radius-sm); }
+.row-x:hover { color: var(--danger); background: var(--bad-bg); }
+.req-meta { margin-top: var(--s-4); grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); align-items: start; }
+.attach-box { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); padding: var(--s-3); border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); }
+.attach-box #reqFiles { color: var(--muted); font-size: var(--fs-sm); }
+.total-card .side-title { margin-bottom: var(--s-2); }
+.total-card .guard-hint { margin: var(--s-3) 0 0; padding: var(--s-2) var(--s-3); border-radius: var(--radius-sm); background: var(--warn-bg); color: var(--warn); }
+.form-tip .tip-head { margin: 0 0 var(--s-1); font-weight: 600; font-size: var(--fs-sm); }
+.form-tip .tip-head + .muted { margin-top: 0; }
+@media (max-width: 720px) { .req-meta { grid-template-columns: minmax(0, 1fr); } .item-group .group-table, .group-sum .group-table { min-width: 560px; } }
+.group-sum { margin: 0 calc(var(--s-3) + 1px); }
+.form-tip .muted + .tip-head { margin-top: var(--s-3); }
+.attach-box #reqFiles > * { margin: 0; }
