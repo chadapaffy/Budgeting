@@ -1310,6 +1310,8 @@
     const cbsItems = cbsMain.length ? cbsMain : CBS_TEMPLATE;
     const field = (label, inner, extra) => '<label class="field"' + (extra || '') + '><span>' + label + '</span>' + inner + '</label>';
     const select = (name, inner, attrs) => '<div class="select-wrap"><select name="' + name + '"' + (attrs || '') + '>' + inner + '</select></div>';
+    /** ชื่อช่องตามไฟล์ Governance: CAPEX / OPEX ใช้ชื่อต่างกัน (สลับตามประเภทงบที่เลือก) */
+    const dual = (capex, opex) => '<span data-for="CAPEX">' + capex + '</span><span data-for="CBS">' + opex + '</span>';
     const radio = (value, title, sub) => '<label class="choice-opt"><input type="radio" name="structure" value="' + value + '"' + (structure === value ? ' checked' : '') + '>' +
       '<span><strong>' + title + '</strong><small>' + sub + '</small></span></label>';
     const title = mode === 'setup' ? (b ? 'แก้ไขงบ ' + esc(b.code) : 'ลงงบประจำปี') : b ? 'แก้ไขร่างคำขออนุมัติงบ ' + esc(b.code) : 'ขออนุมัติงบใหม่';
@@ -1337,27 +1339,32 @@
       '<div class="row">' +
       field('ประเภทงบ', select('type', (mode === 'setup' && v.type !== 'CBS' ? ['CAPEX'] : ['CAPEX', 'CBS']).map((t) => opt(t, TYPE_LABEL[t], v.type)).join(''))) +
       field('บริษัท', select('company', optList(db.master.companies, 'code', (c) => c.code + (c.name ? ' — ' + c.name : ''), v.company))) +
-      field('ปีงบประมาณ', '<input name="fiscalYear" type="number" required value="' + esc(v.fiscalYear) + '">') +
       field('กลุ่มงบประมาณ', select('group', '<option value="">— เลือก —</option>' +
         optList(db.master.groups, 'code', (g) => g.code + (g.name ? ' — ' + g.name : ''), v.group))) +
       '</div>' +
+      '<fieldset class="prio-set gov-set"><legend>' + dual('ข้อมูลตาม Capex Request (Capex / Opex Governance Framework)', 'ข้อมูลตาม Opex Request (Capex / Opex Governance Framework)') + '</legend>' +
       '<div class="row">' +
-      field('รหัสโครงการ (Project No.)', '<input name="code" required value="' + esc(v.code) + '">') +
-      field('ชื่อโครงการ / ชื่องบ', '<input name="name" required value="' + esc(v.name) + '">') +
-      '</div>' +
-      '<div class="row">' +
-      field('หน่วยงาน', select('department', '<option value="">— เลือก —</option>' + optList(db.master.departments, 'name', (d) => d.name, v.department), ' required')) +
-      (mode === 'setup'
-        ? field('Business เจ้าของงบ' + (!v.ownerId && v.ownerName ? ' <small class="muted">(ชื่อในไฟล์: ' + esc(v.ownerName) + ')</small>' : ''), select('ownerId', '<option value="">— เลือก —</option>' + requesters.map((x) => opt(x.id, x.name + (x.title ? ' — ' + x.title : ''), v.ownerId)).join(''), ' required'))
-        : '<input type="hidden" name="ownerId" value="' + esc(v.ownerId) + '"><div class="field"><span>Business เจ้าของงบ</span><div class="out left">' + esc(userName(v.ownerId)) + '</div></div>') +
-      '</div>' +
-      '<fieldset class="prio-set"><legend>การจัดลำดับความสำคัญ (ตามไฟล์ Capex / Opex Governance Framework)</legend><div class="row">' +
+      field(dual('Capex ID', 'Opex ID') + ' <small class="muted">(รหัสโครงการ)</small>', '<input name="code" required value="' + esc(v.code) + '">') +
+      field(dual('ชื่อโครงการ', 'ชื่อรายการ/โครงการ'), '<input name="name" required value="' + esc(v.name) + '">') +
+      '</div><div class="row">' +
+      field('หน่วยงานที่ขอ', select('department', '<option value="">— เลือก —</option>' + optList(db.master.departments, 'name', (d) => d.name, v.department), ' required')) +
       field('กลุ่มรายการ', select('listGroup', '<option value="">— เลือก —</option>' + optList(db.master.listGroups, 'name', (x) => x.name, v.listGroup || ''))) +
+      '</div><div class="row">' +
       field('กลุ่ม Priority', select('priorityGroup', '<option value="">— เลือก —</option>' + optList(db.master.priorityGroups, 'name', (x) => x.name, v.priorityGroup || ''))) +
       field('กลุ่ม Priority การลงทุน (กลุ่มการลงทุน New)', select('investGroup', '<option value="">— เลือก —</option>' + optList(db.master.investGroups, 'name', (x) => x.name, v.investGroup || '')), ' data-for="CAPEX"') +
+      '</div>' +
+      field('เหตุผลสนับสนุน Priority (ย่อ)', '<textarea name="priorityReason" rows="2">' + esc(v.priorityReason || '') + '</textarea>') +
+      '<div class="row">' +
+      '<div class="field"><span>' + dual('มูลค่า Capex รวม (บาท)', 'มูลค่ารวมที่ขออนุมัติ (บาท)') + '</span><div class="out" id="govTotal">0.00</div></div>' +
+      field(dual('เฉลี่ยปีที่ลงทุน', 'ปีงบประมาณ'), '<input name="fiscalYear" type="number" required value="' + esc(v.fiscalYear) + '">') +
+      '<div class="field"><span>สถานะอนุมัติ</span><div class="out left">' + esc(govStatus(b || { state: mode === 'setup' ? 'pending_open' : 'draft' })) + '</div></div>' +
+      '</div><div class="row">' +
+      (mode === 'setup'
+        ? field(dual('Owner (หลัก 1 คน)', 'เจ้าของ Action Plan') + ' <small class="muted">— Business เจ้าของงบ' + (!v.ownerId && v.ownerName ? ' · ชื่อในไฟล์: ' + esc(v.ownerName) : '') + '</small>', select('ownerId', '<option value="">— เลือก —</option>' + requesters.map((x) => opt(x.id, x.name + (x.title ? ' — ' + x.title : ''), v.ownerId)).join('')))
+        : '<input type="hidden" name="ownerId" value="' + esc(v.ownerId) + '"><div class="field"><span>' + dual('Owner (หลัก 1 คน)', 'เจ้าของ Action Plan') + ' <small class="muted">— Business เจ้าของงบ</small></span><div class="out left">' + esc(userName(v.ownerId)) + '</div></div>') +
       field('เจ้าของฝ่ายการเงิน (ติดตามร่วม)', '<input name="financeOwner" list="finOwnerList" value="' + esc(v.financeOwner || '') + '" autocomplete="off">' +
         '<datalist id="finOwnerList">' + uniq(USERS.filter((x) => permsOf(x).includes('budget.manage')).map((x) => x.name).concat(db.budgets.map((x) => x.financeOwner).filter(Boolean))).map((n) => '<option value="' + esc(n) + '">').join('') + '</datalist>') +
-      '</div>' + field('เหตุผลสนับสนุน Priority (ย่อ)', '<textarea name="priorityReason" rows="2">' + esc(v.priorityReason || '') + '</textarea>') + '</fieldset>' +
+      '</div></fieldset>' +
       (mode === 'setup'
         ? '<div class="row">' + field('วันที่อนุมัติงบประจำปี (ถ้ามี)', '<input name="meetingDate" type="date" value="' + esc((v.meeting || {}).date || '') + '">') +
           field('อ้างอิงการอนุมัติงบประจำปี (ถ้ามี)', '<input name="meetingNo" placeholder="เช่น มติที่ประชุม 12/2569" value="' + esc((v.meeting || {}).no || '') + '">') +
@@ -1423,6 +1430,11 @@
         cbs += amt + (tr.querySelector('[name="itVat"]').checked ? round2(amt * VAT_RATE) : 0);
       });
       form.querySelector('[data-total="cbs"]').textContent = money(cbs);
+      const gt = document.getElementById('govTotal');
+      if (gt) {
+        const st = curType() === 'CBS' ? 'items' : (form.querySelector('[name="structure"]:checked') || {}).value;
+        gt.textContent = money(curType() === 'CBS' ? cbs : st === 'project' ? Number(form.elements.projAmount.value || 0) : capex);
+      }
     };
     // งบ OPEX ต้องแยก Item เสมอ (ไม่มีงบรวมทั้งโครงการ)
     const curStructure = () => (curType() === 'CBS' ? 'items' : form.querySelector('[name="structure"]:checked').value);
@@ -3242,9 +3254,9 @@
     const lineRows = [];
     reqs.forEach((r) => { const b = budgetById(r.budgetId); r.lines.forEach((l, i) => { const it = itemById(b, l.itemId) || {};
       lineRows.push([r.no, r.docNo || '', b.code, i + 1, b.structure === 'project' ? '' : it.code || '', b.structure === 'project' ? '' : it.name || '', l.category || '', lineGl(b, l).code, lineGl(b, l).name,
-        lineInvestor(b, l), l.description || '', l.supplier || '', l.amountBeforeVat, l.vat, l.amount, STATUS_LABEL[r.status] || r.status]); }); });
+        lineInvestor(b, l), l.description || '', l.supplier || '', l.purpose || '', l.amountBeforeVat, l.vat, l.amount, STATUS_LABEL[r.status] || r.status]); }); });
     add('lines', [S('เลขที่คำขอ', 15), S('เลขที่เอกสาร', 16), S('รหัสโครงการ'), { h: 'บรรทัด', w: 7, num: true }, S('รหัส Item', 16), S('ชื่อ Item', 26), S('หมวดค่าใช้จ่าย', 18), S('GL Code', 10), S('GL Name', 20),
-      S('บริษัทที่ลงทุน', 12), S('รายละเอียด', 34), S('Supplier', 22), N('ก่อน VAT'), N('VAT'), N('รวม'), S('สถานะ', 20)], lineRows);
+      S('บริษัทที่ลงทุน', 12), S('รายละเอียด', 34), S('Supplier', 22), S('วัตถุประสงค์', 30), N('ก่อน VAT'), N('VAT'), N('รวม'), S('สถานะ', 20)], lineRows);
 
     const cutRows = [];
     reqs.forEach((r) => { const b = budgetById(r.budgetId); (r.cuts || []).forEach((c) => cutRows.push([r.docNo || '', r.no, b.company, T(r.type), b.code, CUT_KIND[c.kind] || c.kind, day(c.date || c.at), c.amount,
@@ -3471,6 +3483,7 @@
     return '<div class="item-group">' +
       '<div class="item-group-head">' + pick +
       '<button type="button" class="group-del" data-remove-group title="ลบรายการนี้" aria-label="ลบรายการนี้">' + ICON_TRASH + '</button></div>' +
+      (capex ? '<div class="group-purpose"><input name="grpPurpose" value="' + esc(rows.map((l) => l.purpose).find(Boolean) || '') + '" aria-label="วัตถุประสงค์ของรายการนี้" placeholder="วัตถุประสงค์ของรายการนี้ เช่น จัดซื้อเครื่องชั่งสำหรับห้องปฏิบัติการ"></div>' : '') +
       '<div class="table-wrap"><table class="edit-table group-table">' + GROUP_COLS +
       '<thead><tr><th>No.</th><th data-sup>Supplier</th><th class="req">รายละเอียด</th><th class="num req">จำนวนก่อน VAT</th><th class="center">VAT 7%</th><th class="num">รวม</th><th></th></tr></thead>' +
       '<tbody class="group-rows">' + rows.map((l) => supRow(l, capex)).join('') + '</tbody></table></div>' +
@@ -3640,6 +3653,7 @@
         investor: rowField(tr, 'lnInv') ? rowField(tr, 'lnInv').value : undefined,
         description: tr.querySelector('[name="lnDesc"]').value.trim(),
         supplier: rowSupplier(tr),
+        purpose: rowField(tr, 'grpPurpose') ? rowField(tr, 'grpPurpose').value.trim() : '',
         amountBeforeVat: before, vat, amount: round2(before + vat)
       };
     }).filter((l) => l.description || l.amountBeforeVat);
@@ -3895,7 +3909,7 @@
 
       const now = new Date().toISOString();
       const clean = lines.map((l) => Object.assign({ itemId: l.itemId, description: l.description, amountBeforeVat: l.amountBeforeVat, vat: l.vat, amount: l.amount },
-        l.category !== undefined ? { category: l.category } : {}, l.investor !== undefined ? { investor: l.investor } : {}, l.supplier ? { supplier: l.supplier } : {}));
+        l.category !== undefined ? { category: l.category } : {}, l.investor !== undefined ? { investor: l.investor } : {}, l.supplier ? { supplier: l.supplier } : {}, l.purpose ? { purpose: l.purpose } : {}));
       const fields = {
         itemId: isCapex ? f.itemId.value : (clean[0] || {}).itemId,
         lines: clean,
@@ -3905,7 +3919,7 @@
         vat: round2(clean.reduce((s, l) => s + l.vat, 0)),
         amount: round2(clean.reduce((s, l) => s + l.amount, 0))
       };
-      fields.purpose = f.purpose ? f.purpose.value.trim() : '';
+      fields.purpose = uniq(clean.map((l) => l.purpose).filter(Boolean)).join(' · ');
       if (f.deliveryDate) fields.deliveryDate = f.deliveryDate.value;
       if (f.payDueDate) fields.payDueDate = f.payDueDate.value;
       clean.forEach((l) => { if (l.supplier) rememberSupplier(l.supplier); });
@@ -6009,16 +6023,16 @@
     // ---- ฟอร์มตั้งงบ / นำเข้างบ
     const bf = document.getElementById('budgetForm');
     if (bf) {
-      markReq(bf, ['type', 'company', 'fiscalYear', 'code', 'name', 'department', 'ownerId', 'meetingNo', 'projAmount']);
+      markReq(bf, ['type', 'company', 'fiscalYear', 'code', 'name', 'department', 'ownerId', 'projAmount']);
       markReqText(bf, 'thead th', /^(รหัส|รหัสรายการย่อย|ชื่อรายการ|รายการ|วงเงิน \(รวม VAT\)|ก่อน VAT)$/);
       guard(bf, [{ btn: 'button[type="submit"]', missing: (f) => {
         const e = f.elements;
         const m = [];
-        if (!filled(e.code)) m.push('รหัสโครงการ');
+        if (!filled(e.code)) m.push(e.type.value === 'CBS' ? 'Opex ID (รหัสโครงการ)' : 'Capex ID (รหัสโครงการ)');
         if (!filled(e.name)) m.push('ชื่อโครงการ');
-        if (!filled(e.department)) m.push('หน่วยงาน');
-        if (!filled(e.fiscalYear)) m.push('ปีงบประมาณ');
-        if (f.dataset.mode === 'setup' && !filled(e.ownerId)) m.push('Business เจ้าของงบ');
+        if (!filled(e.department)) m.push('หน่วยงานที่ขอ');
+        if (!filled(e.fiscalYear)) m.push(e.type.value === 'CBS' ? 'ปีงบประมาณ' : 'เฉลี่ยปีที่ลงทุน');
+        if (f.dataset.mode === 'setup' && !filled(e.ownerId)) m.push('Owner (Business เจ้าของงบ)');
         const type = e.type.value;
         const structure = type === 'CBS' ? 'items' : (f.querySelector('[name="structure"]:checked') || {}).value;
         if (structure === 'project') {

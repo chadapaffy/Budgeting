@@ -1142,3 +1142,7 @@ button.link { color: var(--brand); }
 .group-inv { display: flex; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
 .group-inv .select-wrap { width: 7.5rem; }
 .group-note { margin: 0 0 var(--s-3); font-size: var(--fs-sm); color: var(--muted); }
+.group-purpose { padding: 0 var(--s-2) var(--s-2); }
+.group-purpose input { width: 100%; }
+.gov-set .out { min-height: var(--control-h); display: flex; align-items: center; justify-content: flex-end; font-variant-numeric: tabular-nums; }
+.gov-set .out.left { justify-content: flex-start; }
