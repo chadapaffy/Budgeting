@@ -1090,3 +1090,9 @@ button.link { color: var(--brand); }
 .budget-table td:nth-child(5) { min-width: 7.5rem; }
 
 .budget-table .b-name { max-width: 16rem; }
+
+/* ---- คัดลอกจากโครงการ OPEX ก่อนหน้า */
+.copy-card { margin-bottom: var(--s-4); padding: var(--s-4) var(--s-5); }
+.copy-row { display: flex; gap: var(--s-3); align-items: flex-end; flex-wrap: wrap; }
+.copy-row .field { flex: 1 1 22rem; margin-bottom: 0; }
+.copy-card .small-note { margin: var(--s-2) 0 0; }
