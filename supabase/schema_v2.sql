@@ -233,7 +233,7 @@ end $$;
 
 /**
  * ข้อมูลหลัก 1 แถวต่อ 1 รายการ (key) — items เป็นอาร์เรย์ JSON ตามโครงเดียวกับที่หน้าเว็บใช้
- *   companies [{code,name,logo?}] · departments [{name}] · groups [{code,name}] · assetTypes [{name}] · listGroups [{name}]
+ *   companies [{code,name,logo?}] · departments [{name}] · listGroups [{name}]
  *   suppliers [{name}] · priorityGroups [{name}] · investGroups [{name}]
  * ยังไม่มีแถวของ key ไหน = หน้าเว็บใช้ค่าตั้งต้นของระบบ · ผู้จัดการข้อมูลหลักคนแรกที่เข้าระบบจะบันทึกค่าปัจจุบันขึ้นมาเป็นต้นฉบับ
  */
@@ -258,7 +258,7 @@ revoke all on sequence public.v2_master_history_id_seq from anon, authenticated;
 
 create or replace function public._v2_master_keys() returns text[]
 language sql immutable set search_path = public as $$
-  select array['companies', 'departments', 'groups', 'assetTypes', 'listGroups', 'suppliers', 'priorityGroups', 'investGroups']
+  select array['companies', 'departments', 'listGroups', 'suppliers', 'priorityGroups', 'investGroups']
 $$;
 
 /** ตรวจรูปแบบรายการ: อาร์เรย์ของ object · ไม่เกิน 2000 รายการ · ข้อความไม่เกิน 300 ตัวอักษร (โลโก้ data URL ไม่เกิน 400,000) · ขนาดรวมไม่เกิน 3 MB */
