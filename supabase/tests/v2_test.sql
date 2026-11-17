@@ -13,6 +13,15 @@ insert into public.v2_profiles (id, email, name, role, companies) values
   ('00000000-0000-0000-0000-000000000003', 'biz@example.com', 'Biz', 'business', '{}');
 grant usage on schema public to anon, authenticated;
 
+create or replace function pg_temp.expect_fail_msg(sql text, label text, frag text) returns void language plpgsql as $$
+begin
+  begin execute sql; exception when others then
+    if sqlerrm not like '%' || frag || '%' then raise exception 'FAIL: % ปฏิเสธด้วยเหตุผลอื่น: %', label, sqlerrm; end if;
+    raise notice 'PASS: % (%)', label, sqlerrm; return; end;
+  raise exception 'FAIL: % ควรถูกปฏิเสธ', label;
+end $$;
+grant execute on function pg_temp.expect_fail_msg(text, text, text) to public;
+
 create or replace function pg_temp.expect_fail(sql text, label text) returns void language plpgsql as $$
 begin
   begin execute sql; exception when others then raise notice 'PASS: % (%)', label, sqlerrm; return; end;
@@ -134,4 +143,99 @@ update public.v2_profiles set password_set_at = null where email = 'newbie@examp
 set role anon;
 select pg_temp.ok(public.v2_activation_status('newbie@example.com') = 'ready', 'หลัง Admin รีเซ็ต = ready อีกครั้ง');
 reset role;
+
+-- ================================================================ เฟส 2: ข้อมูลหลัก
+-- (ผู้ใช้ 1 = admin มี master.manage · 2 = controller · 3 = business มี request.create · 4 ไม่มี profile)
+reset role;
+update public.v2_profiles set role = 'admin', active = true where id = '00000000-0000-0000-0000-000000000001';
+update public.v2_profiles set role = 'controller', active = true where id = '00000000-0000-0000-0000-000000000002';
+update public.v2_profiles set role = 'business', active = true where id = '00000000-0000-0000-0000-000000000003';
+delete from public.v2_profiles where id = '00000000-0000-0000-0000-000000000004';
+set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000004', false);
+select pg_temp.expect_fail($$select public.v2_master_get()$$, 'ไม่มี profile อ่านข้อมูลหลักไม่ได้');
+select pg_temp.expect_fail($$select public.v2_master_add_supplier('X')$$, 'ไม่มี profile เพิ่ม Supplier ไม่ได้');
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', false);
+select pg_temp.expect_fail($$select * from public.v2_master$$, 'อ่านตาราง v2_master ตรงๆ ไม่ได้');
+select pg_temp.expect_fail($$select * from public.v2_master_history$$, 'อ่านประวัติข้อมูลหลักตรงๆ ไม่ได้');
+select pg_temp.expect_fail($$insert into public.v2_master (key, items) values ('companies', '[]')$$, 'เขียนตารางตรงๆ ไม่ได้');
+select pg_temp.expect_fail($$select public._v2_master_check('companies', '[]')$$, 'เรียกตัวตรวจภายในไม่ได้');
+select pg_temp.expect_fail($$select public.v2_master_save('companies', '[{"code":"PBI","name":"x"}]')$$, 'business บันทึกข้อมูลหลักไม่ได้');
+select pg_temp.expect_fail($$select public.v2_master_save('suppliers', '[{"name":"x"}]')$$, 'business แก้ Supplier ทั้งรายการไม่ได้');
+select pg_temp.ok(public.v2_master_get() = '{}'::jsonb, 'ยังไม่มีข้อมูล = ว่าง (หน้าเว็บใช้ค่าตั้งต้น)');
+
+-- admin บันทึก
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000001', false);
+select pg_temp.expect_fail_msg($$select public.v2_master_save('bogus', '[]')$$, 'key ที่ไม่รู้จัก', 'ไม่รู้จัก');
+select pg_temp.expect_fail_msg($$select public.v2_master_save('companies', '{"a":1}')$$, 'ต้องเป็นอาร์เรย์', 'รูปแบบข้อมูล');
+select pg_temp.expect_fail_msg($$select public.v2_master_save('companies', '["x"]')$$, 'สมาชิกต้องเป็น object', 'รูปแบบข้อมูล');
+select pg_temp.expect_fail_msg($$select public.v2_master_save('companies', '[{"code":1}]')$$, 'ค่าต้องเป็นข้อความ', 'ต้องเป็นข้อความ');
+select pg_temp.expect_fail_msg($$select public.v2_master_save('departments', jsonb_build_array(jsonb_build_object('name', repeat('ก', 301))))$$, 'ข้อความยาวเกิน 300', 'ยาวเกินไป');
+select pg_temp.expect_fail_msg($$select public.v2_master_save('departments', (select jsonb_agg(jsonb_build_object('name', i::text)) from generate_series(1, 2001) i))$$, 'เกิน 2,000 รายการ', 'มากเกินไป');
+select pg_temp.ok(public.v2_master_get() = '{}'::jsonb, 'บันทึกที่ผิดรูปแบบไม่เขียนอะไรลงฐาน');
+do $$ declare r jsonb; g jsonb; begin
+  r := public.v2_master_save('companies', '[{"code":"PBI","name":"พรีไซซ"},{"code":"PCC","name":"คอร์ป","logo":"data:image/png;base64,AAAA"}]');
+  if jsonb_array_length(r->'items') <> 2 or r->>'updatedAt' is null then raise exception 'FAIL save companies %', r; end if;
+  g := public.v2_master_get();
+  if (g->'companies'->'items'->1->>'logo') is null then raise exception 'FAIL logo หาย'; end if;
+  raise notice 'PASS: admin บันทึกบริษัท (รวมโลโก้)';
+end $$;
+-- ทุกคนที่ล็อกอินอ่านได้
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', false);
+select pg_temp.ok(jsonb_array_length(public.v2_master_get()->'companies'->'items') = 2, 'business อ่านข้อมูลหลักที่ Admin บันทึกได้');
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', false);
+select pg_temp.ok(jsonb_array_length(public.v2_master_get()->'companies'->'items') = 2, 'controller อ่านข้อมูลหลักได้');
+
+-- ล็อกกันทับกัน (optimistic): ต้องส่ง updatedAt เดิม
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000001', false);
+do $$ declare t1 timestamptz; r jsonb; t2 timestamptz; begin
+  t1 := (public.v2_master_get()->'companies'->>'updatedAt')::timestamptz;
+  r := public.v2_master_save('companies', '[{"code":"PBI","name":"พรีไซซ 2"}]', t1);
+  t2 := (r->>'updatedAt')::timestamptz;
+  if t2 <= t1 then raise exception 'FAIL updatedAt ต้องเพิ่มขึ้น'; end if;
+  begin
+    perform public.v2_master_save('companies', '[{"code":"PBI","name":"ทับ"}]', t1);
+    raise exception 'FAIL ควรปฏิเสธเมื่อ updatedAt เก่า';
+  exception when sqlstate '40001' then raise notice 'PASS: แก้ทับของคนอื่นไม่ได้ (updatedAt เก่า)'; end;
+  if (public.v2_master_get()->'companies'->'items'->0->>'name') <> 'พรีไซซ 2' then raise exception 'FAIL ค่าถูกทับ'; end if;
+  begin
+    perform public.v2_master_save('departments', '[{"name":"A"}]', now());
+    raise exception 'FAIL ควรปฏิเสธเมื่อคาดว่ามีแถวแต่ไม่มี';
+  exception when sqlstate '40001' then raise notice 'PASS: คาดว่ามีแถวแต่ไม่มี = ปฏิเสธ'; end;
+  perform public.v2_master_save('departments', '[{"name":"A"}]');  -- ไม่ส่ง expected = บันทึกค่าตั้งต้นครั้งแรก
+  raise notice 'PASS: บันทึกครั้งแรกไม่ต้องส่ง expected';
+end $$;
+reset role;
+select pg_temp.ok((select count(*) from public.v2_master_history where key = 'companies') = 2, 'มีประวัติทุกครั้งที่บันทึก');
+set role authenticated;
+
+-- เพิ่ม Supplier: business ทำได้ (เพิ่มอย่างเดียว) ชื่อซ้ำไม่เพิ่ม
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', false);
+do $$ declare r jsonb; begin
+  r := public.v2_master_add_supplier('  ร้าน  เอ  ');
+  if r->'items'->0->>'name' <> 'ร้าน เอ' then raise exception 'FAIL ต้องจัดช่องว่าง %', r; end if;
+  r := public.v2_master_add_supplier('ร้าน เอ');
+  r := public.v2_master_add_supplier('ร้าน เอ');
+  if jsonb_array_length(r->'items') <> 1 then raise exception 'FAIL ชื่อซ้ำไม่ควรเพิ่ม %', r; end if;
+  r := public.v2_master_add_supplier('ร้าน บี');
+  if jsonb_array_length(r->'items') <> 2 then raise exception 'FAIL เพิ่มชื่อใหม่ %', r; end if;
+  raise notice 'PASS: business เพิ่ม Supplier ใหม่ได้ ชื่อซ้ำไม่เพิ่ม';
+end $$;
+select pg_temp.expect_fail_msg($$select public.v2_master_add_supplier('   ')$$, 'ชื่อว่าง', 'ระบุชื่อ');
+select pg_temp.expect_fail_msg($$select public.v2_master_add_supplier(repeat('ก', 201))$$, 'ชื่อยาวเกิน', 'ยาวเกินไป');
+-- controller ไม่มี request.create / master.manage → เพิ่ม Supplier ไม่ได้ (ผู้คุมงบไม่ได้ขอเบิกเอง)
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', false);
+select pg_temp.expect_fail($$select public.v2_master_add_supplier('ร้าน ซี')$$, 'controller เพิ่ม Supplier ไม่ได้');
+-- admin แก้รายการ Supplier ทั้งชุดได้ และ Supplier ที่ business เพิ่มยังอยู่ก่อนหน้า
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000001', false);
+select pg_temp.ok(jsonb_array_length(public.v2_master_get()->'suppliers'->'items') = 2, 'Admin เห็น Supplier ที่ business เพิ่ม');
+-- ผู้ใช้ที่ถูกปิดการใช้งาน
+reset role;
+update public.v2_profiles set active = false where id = '00000000-0000-0000-0000-000000000003';
+set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', false);
+select pg_temp.expect_fail($$select public.v2_master_get()$$, 'บัญชีที่ปิดแล้วอ่านข้อมูลหลักไม่ได้');
+select pg_temp.expect_fail($$select public.v2_master_add_supplier('Z')$$, 'บัญชีที่ปิดแล้วเพิ่ม Supplier ไม่ได้');
+reset role;
+update public.v2_profiles set active = true where id = '00000000-0000-0000-0000-000000000003';
 \echo ALL V2 TESTS PASSED
