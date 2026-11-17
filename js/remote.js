@@ -169,6 +169,9 @@
     v2MasterSave: (key, items, expectedUpdatedAt) => rpc('v2_master_save', { p_key: key, p_items: items, p_expected: expectedUpdatedAt || null }),
     v2MasterAddSupplier: (name) => rpc('v2_master_add_supplier', { p_name: name }),
     adminUsers: (body) => invoke('v2-admin-users', body),
+    // ---- ข้อมูลงบ (supabase/schema_v2b.sql)
+    v2Load: (since) => rpc('v2_load', { p_since: since || null }),
+    v2SaveDocs: (docs, log) => rpc('v2_save_docs', { p_docs: docs, p_log: log || [] }),
     me: () => rpc('app_me'),
     load: () => rpc('app_load'),
     saveMaster: (key, data, renames) => rpc('app_save_master', { p_key: key, p_data: data, p_renames: renames || [] }),
