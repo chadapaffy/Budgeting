@@ -28,8 +28,9 @@
   const DEMO_USERS = [
     { id: 'req1', email: 'somchai@demo.test', name: 'สมชาย ใจดี', title: 'วิศวกร', department: 'ฝ่ายวิศวกรรม', company: 'PBI', role: 'business' },
     { id: 'req2', email: 'suda@demo.test', name: 'สุดา รักงาน', title: 'เจ้าหน้าที่โครงการ', department: 'ฝ่ายโครงการ', company: 'PBI', role: 'business' },
-    { id: 'fin1', email: 'mali@demo.test', name: 'มาลี เงินดี', title: 'บัญชีการเงิน', department: 'ฝ่ายบัญชีการเงิน', company: 'PBI', role: 'controller' },
-    { id: 'pur1', email: 'piti@demo.test', name: 'ปิติ จัดหา', title: 'เจ้าหน้าที่จัดซื้อ', department: 'ฝ่ายจัดซื้อ', company: 'PBI', role: 'purchasing' },
+    { id: 'fin1', email: 'mali@demo.test', name: 'มาลี เงินดี', title: 'บัญชีการเงิน', department: 'ฝ่ายบัญชีการเงิน', company: 'PBI', companies: ['PBI', 'PCC'], role: 'controller' },
+    { id: 'fin2', email: 'wipa@demo.test', name: 'วิภา บัญชี', title: 'บัญชีการเงิน', department: 'ฝ่ายบัญชีการเงิน', company: 'PCC', companies: ['PCC'], role: 'controller' },
+    { id: 'pur1', email: 'piti@demo.test', name: 'ปิติ จัดหา', title: 'เจ้าหน้าที่จัดซื้อ', department: 'ฝ่ายจัดซื้อ', company: 'PBI', companies: ['PBI', 'PCC'], role: 'purchasing' },
     { id: 'adm1', email: 'adisorn@demo.test', name: 'อดิศร ดูแลระบบ', title: 'ผู้ดูแลระบบ (IT)', department: 'ฝ่าย IT', company: 'PBI', role: 'admin' }
   ];
   /** เปิดปุ่ม "เข้าด้วยบัญชีตัวอย่าง" ในหน้าล็อกอิน (โหมดทดลองเท่านั้น — ข้ามรหัสผ่านเพื่อทดสอบบทบาทต่างๆ) ปิดเมื่อใช้งานจริง */
@@ -584,6 +585,12 @@
     if (!Array.isArray(list) || !list.length) {
       list = DEMO_USERS.map((x) => Object.assign({ active: true, mustSetPassword: true, pwHash: '', pwSalt: '', createdAt: '' }, x));
     }
+    // บัญชีตัวอย่างที่บันทึกไว้ก่อนมีขอบเขตบริษัท: เติมค่าตั้งต้น และเพิ่มบัญชีตัวอย่างใหม่ (ไม่ทับข้อมูลที่ Admin แก้แล้ว)
+    DEMO_USERS.forEach((d) => {
+      const cur = list.find((x) => x.id === d.id);
+      if (!cur) list.push(Object.assign({ active: true, mustSetPassword: true, pwHash: '', pwSalt: '', createdAt: '' }, d));
+      else if (!Array.isArray(cur.companies) && d.companies) cur.companies = d.companies.slice();
+    });
     return list;
   }
   function saveUsers() {
@@ -678,7 +685,9 @@
   const nextUserId = () => { let n = USERS.length + 1; while (USERS.some((u) => u.id === 'u' + n)) n += 1; return 'u' + n; };
   const accountClean = (f) => ({
     email: normEmail(f.email), name: String(f.name || '').trim(), title: String(f.title || '').trim(),
-    department: String(f.department || '').trim(), company: String(f.company || '').trim(), role: String(f.role || '').trim()
+    department: String(f.department || '').trim(), company: String(f.company || '').trim(), role: String(f.role || '').trim(),
+    // บริษัทที่ดูงบ/งานได้ (ผู้คุมงบ / จัดซื้อ) — ไม่ส่งมา = คงค่าเดิม
+    companies: Array.isArray(f.companies) ? uniq(f.companies.map((c) => String(c).trim()).filter(Boolean)) : undefined
   });
   function accountProblem(a, ignoreId) {
     if (!validEmail(a.email)) return 'รูปแบบอีเมลไม่ถูกต้อง';
@@ -693,6 +702,7 @@
     const a = accountClean(f);
     const problem = accountProblem(a, '');
     if (problem) throw new Error(problem);
+    if (a.companies === undefined) a.companies = a.company ? [a.company] : [];
     const u = Object.assign({ id: nextUserId(), active: true, mustSetPassword: true, pwHash: '', pwSalt: '', createdAt: new Date().toISOString(), createdBy: me().id }, a);
     USERS.push(u);
     saveUsers();
@@ -708,6 +718,7 @@
     const a = accountClean(Object.assign({}, u, f));
     const problem = accountProblem(a, id);
     if (problem) throw new Error(problem);
+    if (a.companies === undefined) delete a.companies;
     Object.assign(u, a);
     saveUsers();
     logAction('แก้ไขบัญชีผู้ใช้', u.email, u.name);
@@ -875,6 +886,16 @@
   const permsOf = (u) => (u && (u.perms || DEMO_ROLE_PERMS[u.role])) || [];
   const can = (perm) => permsOf(me()).includes(perm);
   /** เห็นงบและคำขอของทุกคน (สิทธิ์ดูทั้งหมด หรือสิทธิ์ที่ต้องทำงานกับเอกสารของคนอื่น) */
+  /**
+   * ขอบเขตบริษัทที่ดูได้: ผู้ใช้ที่เห็นงบทั้งหมดได้ (ผู้คุมงบ / จัดซื้อ ฯลฯ) เห็นเฉพาะงบของบริษัทใน companies ของบัญชี (ได้หลายบริษัท)
+   * — เห็นทุกงานของบริษัทนั้นแม้ไม่ใช่ผู้รับผิดชอบ · บัญชีที่ไม่มี companies (เช่นโหมด Supabase ที่ฐานข้อมูลคุมสิทธิ์) และ Admin เห็นทุกบริษัท
+   * · คืน null = ไม่จำกัด
+   */
+  const companyScope = () => { const u = me(); return Array.isArray(u.companies) && u.role !== 'admin' ? u.companies : null; };
+  const scopeOk = (company) => { const sc = companyScope(); return !sc || sc.includes(company); };
+  const budgetScoped = (b) => !!b && scopeOk(b.company);
+  const reqScoped = (r) => !!r && budgetScoped(budgetById(r.budgetId));
+  const chgScoped = (c) => !!c && budgetScoped(budgetById(c.budgetId));
   const canViewAll = () => ['budget.view_all', 'budget.manage', 'budget.verify', 'request.decide', 'cut.record', 'po.record'].some(can);
   const roleLabel = (u) => (u && (u.roleName || ROLE_LABEL[u.role] || u.role)) || '';
   const canRequestUser = (x) => (x.canRequest !== undefined ? x.canRequest : permsOf(x).includes('request.create'));
@@ -1020,7 +1041,7 @@
   const currentStep = (r) => (r.status === 'pending' ? r.steps.find((s) => s.status === 'waiting') : null);
   const canAct = (u, step) => !!step && (step.assignee === u.id || permsOf(u).includes('request.decide'));
   const stepAssigneeText = (step) => (step.assignee ? userName(step.assignee) : ROLE_LABEL[step.role]);
-  const inbox = (u) => db.requests.filter((r) => canAct(u, currentStep(r)));
+  const inbox = (u) => db.requests.filter((r) => reqScoped(r) && canAct(u, currentStep(r)));
 
   // ---- คำขอเบิก: 1 ใบมีได้หลายบรรทัด (CAPEX ทุกบรรทัดอยู่ใต้รายการย่อยเดียวกัน, OPEX แต่ละบรรทัดเลือกรายการต้นทุนเองได้)
   const lineTotal = (l) => round2(Number(l.amountBeforeVat || 0) + Number(l.vat || 0));
@@ -1248,7 +1269,7 @@
   function viewBudgets(params, mineRoute) {
     const u = me();
     const mine = !!mineRoute || !canViewAll();
-    const all = db.budgets.filter((b) => !mine || b.ownerId === u.id);
+    const all = db.budgets.filter((b) => (mine ? b.ownerId === u.id : budgetScoped(b)));
     if (TYPE_LABEL[params.get('type')]) budgetFilter.type = params.get('type');
     const depts = uniq(all.map((b) => b.department)).sort();
     const years = uniq(all.map((b) => String(b.fiscalYear))).sort().reverse();
@@ -1475,7 +1496,7 @@
     const setup = mode === 'setup';
     const year = new Date().getFullYear();
     // คัดลอกงบอื่น: Business = งบของตนเอง · ผู้คุมงบ = ทุกงบ
-    const copyList = !b ? db.budgets.filter((x) => x.state !== 'cancelled' && (setup || x.ownerId === u.id))
+    const copyList = !b ? db.budgets.filter((x) => x.state !== 'cancelled' && (setup ? budgetScoped(x) : x.ownerId === u.id))
       .sort((x, y) => String(y.createdAt || '').localeCompare(String(x.createdAt || ''))) : [];
     const copyId = params && params.get ? params.get('copy') : '';
     const copySrc = copyList.find((x) => x.id === copyId) || null;
@@ -1488,7 +1509,7 @@
       items: copySrc.structure === 'project' ? [{ code: '', name: 'งบรวมทั้งโครงการ', amount: budgetTotal(copySrc), vat: 0 }]
         : mainItems(copySrc).map((it) => ({ code: it.code, name: it.name, amount: it.amount, vat: it.vat || 0, assetType: it.assetType || '', glCode: it.glCode || '', glName: it.glName || '' }))
     } : {
-      type: 'CAPEX', structure: 'items', company: (db.master.companies[0] || {}).code || '', fiscalYear: year + 1, group: '', code: '', name: '',
+      type: 'CAPEX', structure: 'items', company: (db.master.companies.find((c) => scopeOk(c.code)) || {}).code || '', fiscalYear: year + 1, group: '', code: '', name: '',
       department: '', ownerId: setup ? '' : u.id, note: '', items: []
     });
     const structure = v.structure || 'items';
@@ -1525,7 +1546,7 @@
       field(dual('Capex ID', 'Opex ID') + ' (รหัสโครงการ)', '<input name="code" required placeholder="ระบุรหัสโครงการ" value="' + esc(v.code) + '">') +
       field(dual('ชื่อโครงการ', 'ชื่อรายการ/โครงการ'), '<input name="name" required placeholder="ระบุชื่อโครงการ" value="' + esc(v.name) + '">') +
       '</div><div class="row">' +
-      field('บริษัท', select('company', optList(db.master.companies, 'code', (c) => c.code + (c.name ? ' — ' + c.name : ''), v.company))) +
+      field('บริษัท', select('company', optList(db.master.companies.filter((c) => scopeOk(c.code) || c.code === v.company), 'code', (c) => c.code + (c.name ? ' — ' + c.name : ''), v.company))) +
       field('หน่วยงานที่ขอ', select('department', '<option value="">— เลือกหน่วยงาน —</option>' + optList(db.master.departments, 'name', (d) => d.name, v.department), ' required')) +
       '</div><div class="form-divider"></div><div class="row">' +
       field('กลุ่ม Priority', select('priorityGroup', '<option value="">— เลือก —</option>' + optList(db.master.priorityGroups, 'name', (x) => x.name, v.priorityGroup || ''))) +
@@ -2619,7 +2640,7 @@
 
   function viewImport() {
     if (!can('budget.manage')) return '<div class="alert error">Import งบได้เฉพาะผู้คุมงบ</div>';
-    const cos = db.master.companies || [];
+    const cos = (db.master.companies || []).filter((c) => scopeOk(c.code));
     if (!importCompany && cos.length === 1) importCompany = cos[0].code;
     if (importCompany && !cos.some((c) => c.code === importCompany)) importCompany = '';
     let html = '<div class="page-head"><div><h1>Import งบประจำปีจาก Excel</h1><div class="page-sub">ลงงบ CAPEX / OPEX หลายงบพร้อมกันจากไฟล์ Governance Framework — งบที่ Import จะรอ Business เจ้าของงบ ขอดำเนินการใช้งบครั้งแรก</div></div></div>' +
@@ -3413,7 +3434,7 @@
 
   function exportData(f) {
     const inB = (b) => b && (!f.year || String(b.fiscalYear) === f.year) && (!f.company || b.company === f.company) && (!f.type || b.type === f.type);
-    const budgets = db.budgets.filter(inB);
+    const budgets = db.budgets.filter((b) => inB(b) && budgetScoped(b));
     const bIds = new Set(budgets.map((b) => b.id));
     const reqs = db.requests.filter((r) => bIds.has(r.budgetId));
     const day = (v) => (v ? String(v).slice(0, 10) : '');
@@ -3485,7 +3506,7 @@
 
   function viewExport() {
     if (!canExport()) return '<div class="alert error">ไม่มีสิทธิ์ส่งออกข้อมูล</div>';
-    const years = uniq(db.budgets.map((b) => String(b.fiscalYear))).sort().reverse();
+    const years = uniq(db.budgets.filter(budgetScoped).map((b) => String(b.fiscalYear))).sort().reverse();
     const sel = (name, label, opts) => '<label class="field"><span>' + label + '</span><div class="select-wrap"><select name="' + name + '">' + opts + '</select></div></label>';
     return '<div class="page-head"><div><h1>ส่งออกข้อมูล (Excel)</h1><div class="page-sub">ข้อมูลการเงินและบัญชีสำหรับทำรายงาน / บันทึกบัญชี — ไฟล์ .xlsx เปิดด้วย Excel ได้ทันที แต่ละหัวข้อเป็นแผ่นงาน (Sheet) แยกกัน</div></div></div>' +
       '<form id="exportForm" class="form-main"><section class="card form-section"><div class="form-grid">' +
@@ -4191,7 +4212,7 @@
 
   function viewRequests() {
     const u = me();
-    const list = canViewAll() ? db.requests : db.requests.filter((r) => r.requesterId === u.id);
+    const list = canViewAll() ? db.requests.filter(reqScoped) : db.requests.filter((r) => r.requesterId === u.id);
     return '<div class="page-head"><h1>' + 'รายการเบิกใช้งบ' + '</h1></div>' + takeFlash() + requestTable(list, true);
   }
 
@@ -5029,7 +5050,7 @@
   const monthLabel = (key) => TH_MONTH[Number(key.slice(5, 7)) - 1] + ' ' + String((Number(key.slice(0, 4)) + 543) % 100);
 
   /** งบที่ผู้ใช้เห็นได้ (ผู้ขอเห็นเฉพาะงบของตนเอง) */
-  const visibleBudgets = () => db.budgets.filter((b) => isActive(b) && (canViewAll() || b.ownerId === me().id));
+  const visibleBudgets = () => db.budgets.filter((b) => isActive(b) && (canViewAll() ? budgetScoped(b) : b.ownerId === me().id));
 
   /** วันที่และยอดที่ฝ่ายบัญชีจ่ายแล้วของคำขอ — ใช้ทำกราฟรายเดือน */
   function paidEntries(r) {
@@ -5174,13 +5195,13 @@
     const task = (label, n, href, note) => '<li><a href="' + href + '"><span>' + label + (note ? '<small>' + note + '</small>' : '') + '</span><b class="' + (n ? 'has' : '') + '">' + n + '</b></a></li>';
     const tasks = [];
     if (can('budget.verify')) {
-      tasks.push(task('งบที่รออนุมัติ / ตรวจ Memo', db.budgets.filter((b) => b.state === 'review' || b.state === 'open_review').length, '#/tasks?tab=budgets'),
-        task('คำขอเพิ่มงบรอตรวจสอบ', (db.changes || []).filter((c) => c.state === 'review').length, '#/tasks?tab=changes'));
+      tasks.push(task('งบที่รออนุมัติ / ตรวจ Memo', db.budgets.filter((b) => budgetScoped(b) && (b.state === 'review' || b.state === 'open_review')).length, '#/tasks?tab=budgets'),
+        task('คำขอเพิ่มงบรอตรวจสอบ', (db.changes || []).filter((c) => chgScoped(c) && c.state === 'review').length, '#/tasks?tab=changes'));
     }
     if (can('request.decide')) tasks.push(task('คำขอเบิกใช้งบรอตรวจสอบ', inbox(u).length, '#/tasks?tab=requests'));
-    if (can('po.record')) tasks.push(task('รอออก PO', db.requests.filter(needsPO).length, '#/tasks?tab=po'));
+    if (can('po.record')) tasks.push(task('รอออก PO', db.requests.filter((r) => reqScoped(r) && needsPO(r)).length, '#/tasks?tab=po'));
     if (can('cut.record')) {
-      const cuts = db.requests.filter(needsCut);
+      const cuts = db.requests.filter((r) => reqScoped(r) && needsCut(r));
       tasks.push(task('รอตัดงบ / ปิดยอด', cuts.length, '#/tasks?tab=cuts', cuts.length ? 'รวม ' + money(cuts.reduce((s2, r) => s2 + Math.max(r.amount - cutTotal(r), 0), 0)) + ' บาท' : ''));
     }
     if (can('budget.create')) {
@@ -5769,7 +5790,7 @@
   // ---------------------------------------------------------------- ผู้คุมงบ: โยก / ลดงบ
 
   function itemSelectOptions(selected) {
-    return db.budgets.filter(isActive).map((b) => '<optgroup label="' + esc(b.code + ' ' + b.name) + '">' +
+    return db.budgets.filter((b) => isActive(b) && budgetScoped(b)).map((b) => '<optgroup label="' + esc(b.code + ' ' + b.name) + '">' +
       ledgerItems(b).map((i) => {
         const v = b.id + '|' + i.id;
         return opt(v, (b.structure === 'project' ? 'งบรวมทั้งโครงการ' : i.code + ' ' + i.name) + ' — คงเหลือ ' + money(usage(b, i.id).remaining), selected);
@@ -5780,7 +5801,8 @@
     if (!can('budget.adjust')) return '<div class="alert error">ไม่มีสิทธิ์โยก/ลดงบ</div>';
     const to = params.get('to') ? params.get('to') + '|' + (params.get('item') || '') : '';
     const from = params.get('budget') ? params.get('budget') + '|' + ((ledgerItems(budgetById(params.get('budget')) || { items: [], type: 'CAPEX' })[0] || {}).id || '') : '';
-    const ctx = budgetById(params.get('budget') || params.get('to'));
+    const ctx0 = budgetById(params.get('budget') || params.get('to'));
+    const ctx = budgetScoped(ctx0) ? ctx0 : undefined;
     const recent = (db.log || []).filter((x) => /^(โยกงบ|ลดงบ)/.test(x.action) && (!ctx || x.ref.split(' → ').includes(ctx.code))).slice(-10).reverse();
     return '<div class="page-head"><div><h1>ปรับปรุงงบ' + (ctx ? ' · ' + esc(ctx.code) : '') + '</h1><div class="page-sub">' + (ctx ? esc(ctx.name) + ' — ' : '') +
       'โยกข้ามรายการหรือข้ามโครงการได้ตามดุลพินิจของผู้คุมงบ ทุกครั้งต้องระบุเหตุผลและเก็บเป็นประวัติการปรับงบ</div></div></div>' + takeFlash() +
@@ -5923,14 +5945,14 @@
 
     if (has('budget.verify')) {
       add('budgets', 'งบรออนุมัติ / ตรวจ Memo', true, 'Memo ขอดำเนินการใช้งบ CAPEX ที่ผู้บริหารเซ็นแล้ว และคำขอตั้งงบใหม่ของ Business (มติ / เอกสารอนุมัติผู้บริหาร) — ตรวจแล้วยืนยันเปิดใช้ หรือส่งกลับให้ Business แก้ไข',
-        [sec('Memo ขอดำเนินการใช้งบ (งบประจำปี)', db.budgets.filter((b) => b.state === 'open_review'), budgetQueueTable),
-          sec('คำขอตั้งงบใหม่ของ Business', db.budgets.filter((b) => b.state === 'review'), budgetQueueTable)]);
+        [sec('Memo ขอดำเนินการใช้งบ (งบประจำปี)', db.budgets.filter((b) => budgetScoped(b) && b.state === 'open_review'), budgetQueueTable),
+          sec('คำขอตั้งงบใหม่ของ Business', db.budgets.filter((b) => budgetScoped(b) && b.state === 'review'), budgetQueueTable)]);
       if (has('budget.manage')) {
         add('setup', 'งบที่ผ่านอนุมัติ / ลงไว้ ยังไม่เปิดใช้งบ', false, 'งบ CAPEX ประจำปีที่ผู้คุมงบลงไว้ (สร้าง / Import Excel) ที่ Business ยังไม่ได้ขอดำเนินการใช้งบ — แก้ไข / ยกเลิกได้จนกว่า Business ส่ง Memo หรือเปิดใช้',
-          [sec('', db.budgets.filter((b) => openFlow(b) && waitingOpen(b)), myBudgetTable)]);
+          [sec('', db.budgets.filter((b) => budgetScoped(b) && openFlow(b) && waitingOpen(b)), myBudgetTable)]);
       }
       add('changes', 'คำขอเพิ่มงบ', true, 'ตรวจมติ / เอกสารอนุมัติผู้บริหารแล้วยืนยันเพิ่มงบ หรือส่งกลับ',
-        [sec('', (db.changes || []).filter((c) => c.state === 'review'), changeQueueTable)]);
+        [sec('', (db.changes || []).filter((c) => chgScoped(c) && c.state === 'review'), changeQueueTable)]);
     }
     if (has('request.decide')) {
       add('requests', 'คำขอเบิกใช้งบ', true, 'ตรวจคำขอแล้วอนุมัติออกใบเบิกใช้งบ หรือส่งกลับ — ขอเกินงบรายการต้องใส่ Note',
@@ -5938,13 +5960,13 @@
     }
     if (has('po.record')) {
       add('po', 'รอออก PO', true, 'ใบเบิกใช้งบประเภท PR/PO ที่ผู้คุมงบอนุมัติแล้ว — บันทึกเลข PR/PO และยอด PO เพื่อตัดงบ',
-        [sec('', db.requests.filter(needsPO), (l) => cutQueueTable(l, false))]);
+        [sec('', db.requests.filter((r) => reqScoped(r) && needsPO(r)), (l) => cutQueueTable(l, false))]);
       add('po-done', 'บันทึก PO แล้ว', false, 'ผู้คุมงบยืนยันยอดและปิดยอดเมื่อรับของ / จ่ายครบ',
-        [sec('', db.requests.filter((r) => r.useType === 'prpo' && hasPO(r) && r.status === 'approved'), (l) => cutQueueTable(l, false))]);
+        [sec('', db.requests.filter((r) => reqScoped(r) && r.useType === 'prpo' && hasPO(r) && r.status === 'approved'), (l) => cutQueueTable(l, false))]);
     }
     if (has('cut.record')) {
       add('cuts', 'รอตัดงบ / ปิดยอด', true, 'ใบเบิกใช้งบที่ออกแล้วแต่ยังไม่ปิดยอด (ไม่รวม PR/PO ที่รอจัดซื้อออก PO)',
-        [sec('', db.requests.filter(needsCut), (l) => cutQueueTable(l, true))]);
+        [sec('', db.requests.filter((r) => reqScoped(r) && needsCut(r)), (l) => cutQueueTable(l, true))]);
     }
     if (has('budget.create') || has('request.create')) {
       const mineB = db.budgets.filter((b) => b.ownerId === u.id);
@@ -6036,8 +6058,8 @@
 
   function viewAdminDemo() {
     const roles = Object.keys(DEMO_ROLE_PERMS);
-    const users = '<div class="table-wrap"><table><thead><tr><th>ชื่อ</th><th>อีเมล</th><th>ตำแหน่ง</th><th>หน่วยงาน</th><th>บริษัท</th><th>บทบาท</th><th>สถานะ</th></tr></thead><tbody>' +
-      USERS.map((x) => '<tr><td>' + esc(x.name) + '</td><td>' + esc(x.email) + '</td><td>' + esc(x.title) + '</td><td>' + esc(x.department) + '</td><td>' + esc(x.company) + '</td><td>' + esc(roleLabel(x)) + '</td><td>' + esc(accountState(x).label) + '</td></tr>').join('') + '</tbody></table></div>';
+    const users = '<div class="table-wrap"><table><thead><tr><th>ชื่อ</th><th>อีเมล</th><th>ตำแหน่ง</th><th>หน่วยงาน</th><th>บริษัท</th><th>บริษัทที่ดูงานได้</th><th>บทบาท</th><th>สถานะ</th></tr></thead><tbody>' +
+      USERS.map((x) => '<tr><td>' + esc(x.name) + '</td><td>' + esc(x.email) + '</td><td>' + esc(x.title) + '</td><td>' + esc(x.department) + '</td><td>' + esc(x.company) + '</td><td>' + esc(Array.isArray(x.companies) ? x.companies.join(', ') : '-') + '</td><td>' + esc(roleLabel(x)) + '</td><td>' + esc(accountState(x).label) + '</td></tr>').join('') + '</tbody></table></div>';
     let group = '';
     const matrix = '<div class="table-wrap"><table class="perm-matrix"><thead><tr><th>สิทธิ์</th>' + roles.map((r) => '<th class="center">' + esc(ROLE_LABEL[r]) + '</th>').join('') + '</tr></thead><tbody>' +
       PERMISSIONS.map((pm) => {
@@ -6076,6 +6098,7 @@
   /** สมมติฐานที่ใช้ในต้นแบบรอบนี้ — รอทีมผู้ใช้ยืนยัน */
   function viewAssumptions() {
     const rows = [
+      ['ระบบ', 'ขอบเขตบริษัทของผู้คุมงบ', 'ผู้คุมงบ / จัดซื้อ เห็นเฉพาะงบ คำขอเบิก คำขอเพิ่มงบ และเอกสารของบริษัทที่บัญชีมีสิทธิ์ (ได้หลายบริษัท) แต่เห็นทุกงานของบริษัทนั้นแม้ไม่ใช่ผู้รับผิดชอบ · Admin กำหนดบริษัทที่ดูได้ให้แต่ละบัญชี · ยังไม่ตัดสิน: ผู้ที่ไม่ใช่ผู้รับผิดชอบ (เจ้าของฝ่ายการเงิน) กดตรวจ/ยืนยันได้หรือไม่ — ตอนนี้กดได้ทุกคนที่มีสิทธิ์ในบริษัท และ Log ผู้ทำจริง'],
       ['ระบบ', 'DOA (อำนาจอนุมัติ)', 'ตัดออกจากระบบก่อน — ตรวจสอบกันเองแบบ Manual: CAPEX ผู้คุมงบนำงบที่ผ่านการอนุมัติแล้วมาลงให้ Business เปิดใช้ · OPEX Business ส่งผู้อนุมัติตามที่ตนรู้เซ็นเอง แล้วแนบเอกสารเปิดใช้งบ · ไม่มีหมวด DOA ใน Item, ไม่มีตาราง DOA ในใบเบิกใช้งบ, ไม่มีช่อง "อ้างอิงอำนาจอนุมัติ" ใน Memo, ไม่มีเมนู "ตารางอำนาจอนุมัติ" ในข้อมูลหลัก'],
       ['ระบบ', 'Admin ทำอะไรได้', 'ดูแลข้อมูลหลัก ดู Log ทั้งระบบ และจัดการผู้ใช้/สิทธิ์ · ดูงบได้ทั้งหมดแต่ไม่ทำรายการ'],
       ['ระบบ', 'ผู้ใช้ทั่วไปเห็นประวัติแค่ไหน', 'เห็น "ประวัติการทำรายการ" ที่ตนทำ และที่ผู้อื่นทำกับงบ/เอกสารของตน (ไม่เห็น Log ทั้งระบบ)'],
@@ -6450,7 +6473,20 @@
     const app = document.getElementById('app');
     let html;
 
-    if (parts[0] === 'dashboard') html = viewDashboard(params);
+    // บริษัทนอกขอบเขตของผู้ใช้: เปิดงบ / คำขอ / เอกสาร / คำขอเพิ่มงบ ของบริษัทอื่นไม่ได้
+    const guardCo = () => {
+      const sc = companyScope();
+      if (!sc) return null;
+      let b = null;
+      if (parts[0] === 'budget' && parts[1] && !['new', 'import'].includes(parts[1])) b = budgetById(parts[1]);
+      else if ((parts[0] === 'request' || parts[0] === 'doc') && parts[1] && parts[1] !== 'new') { const r = requestById(parts[1]); b = r && budgetById(r.budgetId); }
+      else if (parts[0] === 'change' && parts[1] && parts[1] !== 'new') { const c = changeById(parts[1]); b = c && budgetById(c.budgetId); }
+      return b && !scopeOk(b.company) ? b.company : null;
+    };
+    const outCo = guardCo();
+
+    if (outCo) html = '<div class="alert error">ไม่มีสิทธิ์ดูข้อมูลของบริษัท ' + esc(outCo) + ' — บัญชีของคุณดูได้เฉพาะบริษัท ' + esc(companyScope().join(', ') || '(ยังไม่ได้กำหนด)') + ' · ติดต่อผู้ดูแลระบบหากต้องการเพิ่มสิทธิ์</div>';
+    else if (parts[0] === 'dashboard') html = viewDashboard(params);
     else if (parts[0] === 'master') html = viewMaster(parts[1]);
     else if (parts[0] === 'admin') html = viewAdmin(params);
     else if (parts[0] === 'account') html = viewAccount();
@@ -6697,7 +6733,7 @@
     const row = (k, v) => '<tr><th scope="row">' + k + '</th><td>' + (v ? esc(v) : '<span class="muted">-</span>') + '</td></tr>';
     return '<div class="page-head"><div><h1>บัญชีของฉัน</h1><div class="page-sub">ข้อมูลบัญชีให้ผู้ดูแลระบบแก้ไข — เปลี่ยนรหัสผ่านได้เอง</div></div></div>' + takeFlash() +
       '<section class="card form-section"><div class="section-head"><h2 class="section-title">ข้อมูลบัญชี</h2></div><div class="table-wrap"><table><tbody>' +
-      row('ชื่อ', u.name) + row('อีเมล', u.email) + row('ตำแหน่ง', u.title) + row('หน่วยงาน', u.department) + row('บริษัท', u.company) + row('บทบาท', roleLabel(u)) +
+      row('ชื่อ', u.name) + row('อีเมล', u.email) + row('ตำแหน่ง', u.title) + row('หน่วยงาน', u.department) + row('บริษัท', u.company) + (Array.isArray(u.companies) && u.role !== 'admin' ? row('บริษัทที่ดูงบ / งานได้', u.companies.join(', ') || 'ยังไม่ได้กำหนด — ติดต่อผู้ดูแลระบบ') : '') + row('บทบาท', roleLabel(u)) +
       '</tbody></table></div></section>' +
       (REMOTE ? '' : '<section class="card form-section"><div class="section-head"><h2 class="section-title">เปลี่ยนรหัสผ่าน</h2></div>' +
         (u.pwHash ? '<form id="pwForm" class="form-narrow"><div id="pwMsg"></div>' +
