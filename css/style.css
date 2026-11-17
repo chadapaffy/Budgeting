@@ -1190,3 +1190,5 @@ button.link { color: var(--brand); }
 .sync-bar { position: fixed; right: 16px; bottom: 16px; z-index: 900; max-width: min(440px, calc(100vw - 32px)); }
 .sync-bar .alert { margin: 0; box-shadow: var(--shadow); }
 .sync-bar .actions { margin-top: var(--s-2); }
+/* หัวกลุ่มในเมนูซ้าย (เช่น ผู้ดูแลระบบ) — ใช้ .nav-label เดิม เว้นระยะด้านบนเท่านั้น */
+#nav .nav-label.nav-group { margin-top: var(--s-5); }

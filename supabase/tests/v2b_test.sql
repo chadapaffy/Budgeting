@@ -39,20 +39,9 @@ grant execute on function pg_temp.ids(jsonb, text) to public;
 
 set role authenticated;
 
--- ---------------------------------------------------------------- ข้อมูลหลัก: เฉพาะผู้มีสิทธิ์ master.manage
-select pg_temp.as_user(5);
-select pg_temp.expect_fail($$select public.v2_save_docs('[{"kind":"master","id":"master","version":0,"data":{"companies":[]}}]')$$, 'business เขียนข้อมูลหลักไม่ได้', 'ไม่มีสิทธิ์');
-select pg_temp.as_user(2);
-select pg_temp.expect_fail($$select public.v2_save_docs('[{"kind":"master","id":"master","version":0,"data":{"companies":[]}}]')$$, 'ผู้คุมงบเขียนข้อมูลหลักไม่ได้', 'ไม่มีสิทธิ์');
+-- ข้อมูลหลักไม่ใช่เอกสารในชั้นนี้ (อยู่ที่ v2_master)
 select pg_temp.as_user(1);
-select public.v2_save_docs('[{"kind":"master","id":"master","version":0,"data":{"companies":[{"code":"PBI"}]}}]');
-select pg_temp.expect_fail($$select public.v2_save_docs('[{"kind":"master","id":"master","version":0,"data":{"x":1}}]')$$, 'สร้างข้อมูลหลักซ้ำ (version 0) = CONFLICT', 'CONFLICT');
-do $$ begin
-  perform pg_temp.ok((select public.v2_save_docs('[{"kind":"master","id":"master","version":1,"data":{"companies":[{"code":"PBI"},{"code":"PCC"}]}}]') -> 'docs' -> 0 ->> 'version') = '2', 'Admin แก้ข้อมูลหลัก version 1→2');
-end $$;
--- ทุกคนอ่านข้อมูลหลักได้
-select pg_temp.as_user(5);
-select pg_temp.ok(pg_temp.ids(public.v2_load(), 'master') = 'master', 'business อ่านข้อมูลหลักได้');
+select pg_temp.expect_fail($$select public.v2_save_docs('[{"kind":"master","id":"master","version":0,"data":{"companies":[]}}]')$$, 'ไม่รับเอกสารชนิด master แล้ว', 'ชนิดหรือรหัสเอกสารไม่ถูกต้อง');
 
 -- ---------------------------------------------------------------- งบ: เจ้าของ / บริษัท
 select pg_temp.as_user(1);

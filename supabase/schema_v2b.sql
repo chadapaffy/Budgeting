@@ -1,4 +1,5 @@
--- ระบบขอเบิกใช้งบประมาณ (ต้นแบบรอบใหม่) — เฟส 2a: ข้อมูลหลัก งบ คำขอ คำขอเพิ่มงบ และ Log บนฐานข้อมูล
+-- ระบบขอเบิกใช้งบประมาณ (ต้นแบบรอบใหม่) — เฟส 2a: งบ คำขอเบิก คำขอเพิ่มงบ และ Log บนฐานข้อมูล
+-- (ข้อมูลหลักเก็บแยกใน schema_v2.sql: v2_master / v2_master_history)
 -- ต้องรัน schema_v2.sql (เฟส 1) ก่อน · รันซ้ำได้ ไม่ลบข้อมูล · วางทั้งไฟล์ใน Supabase → SQL Editor → Run
 --
 -- โมเดล
@@ -13,7 +14,7 @@
 -- ---------------------------------------------------------------- ตาราง
 
 create table if not exists public.v2_docs (
-  kind          text not null check (kind in ('master', 'budget', 'request', 'change')),
+  kind          text not null check (kind in ('budget', 'request', 'change')),
   id            text not null,
   company       text not null default '',     -- บริษัทของงบ (request/change ใช้ของงบที่อ้างอิง)
   owner_id      text not null default '',     -- เจ้าของงบ (id ผู้ใช้)
@@ -68,7 +69,6 @@ $$;
 create or replace function public._v2_doc_visible(u public.v2_profiles, p_kind text, p_company text, p_owner text, p_requester text) returns boolean
 language sql stable security definer set search_path = public as $$
   select case
-    when p_kind = 'master' then true
     when public._v2_sees_all(u.role) then public._v2_company_ok(u, p_company)
     when p_kind = 'request' then p_requester = u.id::text
     else p_owner = u.id::text
@@ -78,7 +78,6 @@ $$;
 create or replace function public._v2_can_write(p_role text, p_kind text) returns boolean
 language sql stable security definer set search_path = public as $$
   select case p_kind
-    when 'master'  then 'master.manage' = any (public._v2_perms(p_role))
     when 'budget'  then public._v2_perms(p_role) && array['budget.create', 'budget.manage', 'budget.verify', 'budget.adjust', 'request.create']
     when 'request' then public._v2_perms(p_role) && array['request.create', 'request.decide', 'cut.record', 'po.record', 'budget.manage', 'budget.verify']
     when 'change'  then public._v2_perms(p_role) && array['budget.create', 'request.create', 'budget.verify', 'budget.manage', 'budget.adjust']
@@ -136,7 +135,7 @@ begin
   for d in select * from jsonb_array_elements(p_docs) loop
     v_kind := d ->> 'kind';
     v_id := d ->> 'id';
-    if v_kind is null or v_kind not in ('master', 'budget', 'request', 'change') or coalesce(v_id, '') = '' then raise exception 'ชนิดหรือรหัสเอกสารไม่ถูกต้อง'; end if;
+    if v_kind is null or v_kind not in ('budget', 'request', 'change') or coalesce(v_id, '') = '' then raise exception 'ชนิดหรือรหัสเอกสารไม่ถูกต้อง'; end if;
     if not public._v2_can_write(u.role, v_kind) then raise exception 'ไม่มีสิทธิ์บันทึกเอกสารชนิดนี้ (%)', v_kind using errcode = '42501'; end if;
     is_del := coalesce((d ->> 'deleted')::boolean, false);
     expected := coalesce((d ->> 'version')::integer, 0);

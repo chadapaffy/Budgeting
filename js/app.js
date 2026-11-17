@@ -109,11 +109,6 @@
   const MEMO_MODES = [['', 'ไม่ต้องใช้'], ['cross', 'ใช้เงินข้ามบริษัทกับบริษัทนี้']];
   /** เกณฑ์ตั้งต้น: งบของ PCC ที่บริษัทอื่นมาใช้ (หรือ PCC ออกเงินให้งบของบริษัทอื่น) ต้องทำ Memo */
   const memoDefaultFor = (code) => (code === 'PCC' ? 'cross' : '');
-  /** ผู้ลงนามใน Memo ตั้งต้น (ข้อความตัวอย่างทั่วไป ใส่ชื่อ/ตำแหน่งจริงที่ข้อมูลหลัก > ผู้ลงนาม Memo) */
-  const MEMO_PARTY_SAMPLE = {
-    PBI: { to: 'ผู้บริหารสูงสุด PBI (ตัวอย่าง)', cc: 'บัญชี / การเงิน PBI (ตัวอย่าง)', reviewer: 'ผู้บริหารฝ่ายการเงิน PBI (ตัวอย่าง)', signer: 'กรรมการผู้จัดการ PBI (ตัวอย่าง)' },
-    PCC: { to: 'ผู้บริหารสูงสุด PCC (ตัวอย่าง)', cc: 'บัญชี / การเงิน PCC (ตัวอย่าง)', reviewer: 'ผู้บริหารฝ่ายการเงิน PCC (ตัวอย่าง)', signer: 'กรรมการผู้จัดการ PCC (ตัวอย่าง)' }
-  };
   const TYPE_LABEL = { CAPEX: 'งบลงทุน (CAPEX)', CBS: 'งบดำเนินงาน (OPEX)' };
   /** ชื่อย่อที่แสดง: รหัสภายใน 'CBS' แสดงเป็น OPEX */
   const TYPE_SHORT = { CAPEX: 'CAPEX', CBS: 'OPEX' };
@@ -165,10 +160,6 @@
     reimburse: { label: 'พนักงานสำรองจ่าย', short: 'สำรองจ่าย', cut: 'ตัดงบเมื่อจ่ายคืนพนักงานตามใบเสร็จ', who: 'ผู้คุมงบ' },
     direct: { label: 'จ่ายตรงให้ Supplier', short: 'จ่ายตรง', cut: 'ตัดงบเมื่อจ่ายเงินให้ Supplier', who: 'ผู้คุมงบ', hint: 'ค่าแรง · จ้างเหมา · จ่ายรายวัน · ค่าน้ำมัน · Stock' }
   };
-  const DEFAULT_CATEGORIES = [
-    { name: 'ค่าแรง', gl: '520101' }, { name: 'ค่าวัสดุ / อุปกรณ์', gl: '510101' }, { name: 'ค่าจ้างเหมา', gl: '520201' },
-    { name: 'ค่าเครื่องจักร / สินทรัพย์', gl: '' }, { name: 'ค่าขนส่ง', gl: '540101' }, { name: 'ค่าเช่า', gl: '530101' }, { name: 'อื่นๆ', gl: '' }
-  ];
   /** โหมดทดลองเก็บไฟล์แนบในเบราว์เซอร์ จึงจำกัดขนาดไว้เล็ก (ระบบจริงเก็บใน Storage ได้ใหญ่กว่า) */
   const ATTACH_MAX = 400 * 1024;
   /** กลุ่ม Priority ตั้งต้น (ตามไฟล์ Capex / Opex Governance Framework) — เพิ่ม / แก้ได้ที่ข้อมูลหลัก */
@@ -199,8 +190,6 @@
     const groups = list('groups').slice();
     const assetTypes = list('assetTypes').slice();
     ASSET_TYPES.forEach((t) => addBy(assetTypes, 'name', { name: t }));
-    const glCodes = list('glCodes').slice();
-    const expenseCategories = list('expenseCategories').length ? list('expenseCategories').slice() : DEFAULT_CATEGORIES.map((c) => Object.assign({}, c));
     const priorityGroups = list('priorityGroups').slice();
     if (!priorityGroups.length) DEFAULT_PRIORITY_GROUPS.forEach((n) => priorityGroups.push({ name: n }));
     const investGroups = list('investGroups').slice();
@@ -222,17 +211,12 @@
       addBy(groups, 'code', { code: b.group, name: DEFAULT_GROUP_NAMES[b.group] || '' });
       (b.items || []).forEach((it) => {
         if (b.type === 'CAPEX') addBy(assetTypes, 'name', { name: it.assetType });
-        else addBy(glCodes, 'code', { code: it.glCode, name: it.glName || '' });
       });
     });
     // ค่าเดิมแบบติ๊ก (true/false) หรือยังไม่ตั้ง → ใช้เกณฑ์ตั้งต้น "เฉพาะงบที่ไม่มี Item"
     // เกณฑ์ Memo แบบใหม่ (ใช้เงินข้ามบริษัท) — เปลี่ยนจากเกณฑ์เดิมครั้งเดียว แล้วปรับเองได้ที่ข้อมูลหลัก
     if (m.memoRule !== 2) companies.forEach((c) => { c.memo = memoDefaultFor(c.code); });
     companies.forEach((c) => { if (!MEMO_MODES.some(([v]) => v === c.memo)) c.memo = memoDefaultFor(c.code); });
-    const memoParties = list('memoParties').slice();
-    companies.forEach((c) => {
-      if (!memoParties.some((x) => x.code === c.code)) memoParties.push(Object.assign({ code: c.code, to: '', cc: '', reviewer: '', signer: '' }, MEMO_PARTY_SAMPLE[c.code] || {}));
-    });
     // ตัวเลือกตั้งต้นรุ่นใหม่ (ครั้งเดียว): เติมหน่วยงาน / กลุ่ม Priority / กลุ่ม Priority การลงทุน · เอากลุ่ม Priority ตั้งต้นเดิมที่ไม่อยู่ในรายการใหม่ออก ถ้ายังไม่มีงบใช้
     let prio = priorityGroups;
     if (m.listsV !== MASTER_LISTS_V) {
@@ -242,7 +226,7 @@
       DEFAULT_DEPARTMENTS.forEach((n) => addBy(departments, 'name', { name: n }));
       DEFAULT_INVEST_GROUPS.forEach((n) => addBy(investGroups, 'name', { name: n }));
     }
-    d.master = { companies, departments, groups, assetTypes, glCodes, expenseCategories, memoParties, priorityGroups: prio, investGroups, listGroups, suppliers, memoRule: 2, listsV: MASTER_LISTS_V };
+    d.master = { companies, departments, groups, assetTypes, priorityGroups: prio, investGroups, listGroups, suppliers, memoRule: 2, listsV: MASTER_LISTS_V };
     return d;
   }
   const companyMap = () => Object.fromEntries(db.master.companies.map((c) => [c.code, c.name]));
@@ -253,12 +237,9 @@
     optList(db.master.companies, 'code', (c) => c.code, selected) + '</select></div>';
   /** หลายคนคั่นด้วย ; หรือขึ้นบรรทัดใหม่ */
   const splitPeople = (v) => String(v || '').split(/\s*;\s*|\n/).map((x) => x.trim()).filter(Boolean);
-  /** ผู้รับ/ผู้ลงนามใน Memo ตั้งต้น: ของบริษัทที่ลงทุน (เรียน/สำเนา/ผู้ทบทวน/ผู้พิจารณา) และผู้ลงนามเสนอของบริษัทเจ้าของงบ */
-  function defaultMemoParties(b, investor) {
-    const list = db.master.memoParties || [];
-    const inv = list.find((x) => x.code === investor) || {};
-    const own = list.find((x) => x.code === b.company) || {};
-    return { to: splitPeople(inv.to), cc: splitPeople(inv.cc), reviewers: splitPeople(inv.reviewer), approvers: splitPeople(inv.to), proposer: String(own.signer || '').trim() };
+  /** ผู้รับ/ผู้ลงนามใน Memo: เริ่มว่าง — ผู้ทำ Memo กรอกเองในแบบฟอร์ม (ไม่มีข้อมูลหลักผู้ลงนามแล้ว) */
+  function defaultMemoParties() {
+    return { to: [], cc: [], reviewers: [], approvers: [], proposer: '' };
   }
   const investorCell = (code) => '<span class="nowrap">' + esc(code) + '</span>';
   const assetTypeList = () => db.master.assetTypes.map((x) => x.name);
@@ -524,7 +505,6 @@
     if (comps.some((c) => c.code === to)) m.companies = comps.filter((c) => c.code !== from);
     else comps.forEach((c) => { if (c.code === from) { c.code = to; c.name = String(c.name || '').split(from).join(to); } });
     const fix = (o, k) => { if (o && o[k] === from) o[k] = to; };
-    (m.memoParties || []).forEach((x) => fix(x, 'code'));
     (d.budgets || []).forEach((b) => { fix(b, 'company'); (b.items || []).forEach((it) => fix(it, 'investor')); });
     (d.requests || []).forEach((r) => (r.lines || []).forEach((l) => fix(l, 'investor')));
     (d.changes || []).forEach((c) => (c.lines || []).forEach((l) => fix(l, 'investor')));
@@ -792,6 +772,49 @@
   }
 
   // ---- โหมด Supabase (เฟส 1): บัญชีและบทบาทอยู่บนเซิร์ฟเวอร์ ----------------------------------------
+  // ---- ข้อมูลหลักบนเซิร์ฟเวอร์ (เฟส 2): โหมด Supabase เก็บกลาง ทุกคนเห็นชุดเดียวกัน · key = รายการใน MASTER_NAV
+  let masterMeta = {};            // key → updatedAt ล่าสุดจากเซิร์ฟเวอร์ (ใช้กันบันทึกทับกัน) · null = เซิร์ฟเวอร์ยังไม่มีรายการนี้
+  let masterOnline = false;       // โหลดจากเซิร์ฟเวอร์สำเร็จหรือยัง (false = ใช้ค่าในเครื่อง ยังไม่ได้รันสคริปต์ล่าสุด หรือออฟไลน์)
+  let masterError = '';
+  /**
+   * โหลดข้อมูลหลักจากเซิร์ฟเวอร์มาแทนค่าในเครื่อง · รายการที่เซิร์ฟเวอร์ยังไม่มี = ใช้ค่าตั้งต้น และถ้าเป็นผู้จัดการข้อมูลหลัก
+   * จะบันทึกค่าปัจจุบันขึ้นไปเป็นต้นฉบับ (ครั้งเดียว) · คืน true ถ้าข้อมูลที่แสดงเปลี่ยน · ข้อผิดพลาดอื่นนอกจากหมดเวลาล็อกอินไม่ทำให้ระบบหยุด
+   */
+  async function loadRemoteMaster() {
+    if (!AUTH_REMOTE) return false;
+    const before = JSON.stringify(db.master);
+    let g;
+    try {
+      g = await window.RemoteApi.v2MasterGet();
+    } catch (e) {
+      if (e && e.code === 'AUTH') throw e;
+      masterOnline = false;
+      masterError = (e && e.message) || 'โหลดข้อมูลหลักจากเซิร์ฟเวอร์ไม่ได้';
+      return false;
+    }
+    masterOnline = true;
+    masterError = '';
+    g = g || {};
+    MASTER_NAV.forEach(([k]) => {
+      if (g[k] && Array.isArray(g[k].items)) { db.master[k] = g[k].items; masterMeta[k] = g[k].updatedAt || null; } else masterMeta[k] = null;
+    });
+    db = ensureMaster(db);
+    if (can('master.manage')) {
+      for (const [k] of MASTER_NAV) {
+        if (masterMeta[k] !== null) continue;
+        try {
+          const r = await window.RemoteApi.v2MasterSave(k, db.master[k], null);
+          masterMeta[k] = r.updatedAt;
+        } catch (e) {
+          if (e && e.code === 'AUTH') throw e;
+          console.warn('บันทึกข้อมูลหลักตั้งต้นขึ้นเซิร์ฟเวอร์ไม่สำเร็จ', k, e && e.message);
+        }
+      }
+    }
+    save();
+    return JSON.stringify(db.master) !== before;
+  }
+
   let accountsReady = false; // โหมด Supabase: โหลดบัญชี/บทบาทของผู้ใช้ที่ล็อกอินแล้ว
   const remoteRoleSys = {};  // roleKey → true ถ้าเป็นบทบาทตั้งต้นของระบบ (ลบไม่ได้)
   const profileToUser = (p) => Object.assign({}, p, {
@@ -1404,6 +1427,7 @@
     history: '<path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/>',
     master: '<ellipse cx="12" cy="5.5" rx="7.5" ry="2.5"/><path d="M4.5 5.5v6.5c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5V5.5"/><path d="M4.5 12v6.5c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5V12"/>',
     log: '<rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M12 15h5"/>',
+    roles: '<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/><path d="M9 12l2.2 2.2L15.5 10"/>',
     admin: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.3-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/>',
     export: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 12l6 6M15 12l-6 6"/>',
     report: '<path d="M4 20V4"/><path d="M4 20h16"/><rect x="7.5" y="11" width="3" height="6" rx=".8"/><rect x="12.5" y="7" width="3" height="10" rx=".8"/><rect x="17.5" y="13" width="2.5" height="4" rx=".8"/>',
@@ -1423,19 +1447,31 @@
     if (tabs.length) links.push(['tasks', '#/tasks', 'งานทั้งหมด' + count(tabs.reduce((n, t) => n + (t.act ? t.n : 0), 0)), ['#/tasks', '#/approvals', '#/po', '#/cuts', '#/accounting', '#/payments']]);
     if (canViewAll() || can('request.create')) links.push(['requests', '#/requests', 'รายการเบิกใช้งบ', ['#/requests', '#/request/', '#/doc/']]);
     if (isWorker(u)) links.push(['history', '#/history', 'ประวัติการทำรายการ', ['#/history']]);
-    if (adminTabsFor().length) {
-      links.push(['admin', adminTabsFor()[0][1], 'Admin' + count(REMOTE ? adminCounts.pending : adminResetCount()), ['#/admin', '#/master', '#/log']]);
-      if (route.startsWith('#/master')) {
-        const cur = route.split('/')[2] || MASTER_NAV[0][0];
-        MASTER_NAV.forEach(([k, t]) => links.push(['sub', '#/master/' + k, t, [], k === cur]));
-      }
-    }
     if (can('data.export')) links.push(['export', '#/export', 'ส่งออกข้อมูล (Excel)', ['#/export']]);
     links.push(['report', '#/dashboard', 'รายงาน', ['#/dashboard']]);
+    // ผู้ดูแลระบบ: ต่อจากเมนูรายงาน (แสดงเมนูละรายการตามสิทธิ์)
+    if (can('user.manage') || can('master.manage') || can('log.view')) {
+      links.push(['group', '', 'ผู้ดูแลระบบ']);
+      const onAdmin = route.startsWith('#/admin');
+      const rolesTab = /(^|&)tab=roles(&|$)/.test(location.hash.split('?')[1] || '');
+      if (can('user.manage')) {
+        links.push(['admin', '#/admin', 'ผู้ใช้' + count(REMOTE ? adminCounts.pending : adminResetCount()), ['#/admin'], undefined, onAdmin && !rolesTab]);
+        links.push(['roles', '#/admin?tab=roles', 'บทบาทและสิทธิ์', ['#/admin'], undefined, onAdmin && rolesTab]);
+      }
+      if (can('master.manage')) {
+        links.push(['master', '#/master', 'ข้อมูลหลัก', ['#/master']]);
+        if (route.startsWith('#/master')) {
+          const cur = route.split('/')[2] || MASTER_NAV[0][0];
+          MASTER_NAV.forEach(([k, t]) => links.push(['sub', '#/master/' + k, t, [], k === cur]));
+        }
+      }
+      if (can('log.view')) links.push(['log', '#/log', 'Log การทำงาน', ['#/log']]);
+    }
     let activeDone = false;
-    document.getElementById('nav').innerHTML = links.map(([icon, href, text, prefixes, subActive]) => {
+    document.getElementById('nav').innerHTML = links.map(([icon, href, text, prefixes, subActive, override]) => {
+      if (icon === 'group') return '<div class="nav-label nav-group">' + text + '</div>';
       if (icon === 'sub') return '<a class="sub' + (subActive ? ' sub-active' : '') + '" href="' + href + '"' + (subActive ? ' aria-current="page"' : '') + '><span>' + text + '</span></a>';
-      const active = !activeDone && prefixes.some((p) => route.startsWith(p));
+      const active = override !== undefined ? override : (!activeDone && prefixes.some((p) => route.startsWith(p)));
       if (active) activeDone = true;
       return '<a href="' + href + '"' + (active ? ' class="active" aria-current="page"' : '') + '>' + navIcon(icon) + '<span>' + text + '</span></a>';
     }).join('');
@@ -2949,7 +2985,7 @@
       '<td><input name="siUnit" value="' + esc(it.unit || '') + '" aria-label="หน่วย"></td>' +
       '<td><input name="siAmount" type="number" min="0" step="0.01" class="right" value="' + esc(it.amount || '') + '" placeholder="ไม่กำหนด" aria-label="วงเงินก่อน VAT เว้นว่าง = ไม่กำหนด"></td>' +
       '<td class="center"><input name="siVat" type="checkbox"' + (Number(it.vat) > 0 ? ' checked' : '') + ' aria-label="VAT 7%"></td>' +
-      '<td><input name="siGl" list="glList" value="' + esc(it.glCode || '') + '" aria-label="GL Code"></td>' +
+      '<td><input name="siGl" value="' + esc(it.glCode || '') + '" aria-label="GL Code"></td>' +
       '<td class="nowrap">' + (lv === 1 ? '<button type="button" class="btn small" data-add-child title="เพิ่ม Item ย่อยระดับถัดไป (เช่น 1.1.1)">+ ย่อย</button> ' : '') +
       (locked ? '<span class="muted" title="มีการขอใช้แล้ว ลบไม่ได้">🔒</span>' : '<button type="button" class="btn small bad" data-remove-sub title="ลบ">×</button>') + '</td></tr>';
   }
@@ -2974,7 +3010,6 @@
     return '<div class="page-head"><div><h1>จัดการ Item ย่อย · ' + esc(b.code) + '</h1><div class="page-sub">' + esc(b.name) +
       ' — เพิ่ม Item ย่อยได้ 2 ระดับใต้ Item หลัก (1 → 1.1 → 1.1.1) และเพิ่มได้เรื่อย ๆ · เงื่อนไข: วงเงินรวมของ Item ย่อยต้องไม่เกิน Item หลัก · จะกำหนดวงเงินของ Item ย่อยหรือไม่ก็ได้ (เว้นว่าง = ใช้วงเงินของ Item แม่) · จำนวน / หน่วย กรอกที่ Item ย่อย</div></div></div>' +
       '<div id="formError"></div>' +
-      '<datalist id="glList">' + db.master.glCodes.map((g) => '<option value="' + esc(g.code) + '">' + esc(g.name) + '</option>').join('') + '</datalist>' +
       '<form id="subItemsForm" data-id="' + b.id + '"><div class="form-main">' + sections +
       '<div class="actions"><button class="btn primary" type="submit">บันทึก Item ย่อย</button><a class="btn" data-back href="#/budget/' + b.id + '">ยกเลิก</a></div></div>' +
       '<template id="subTpl">' + subItemRow(b, {}, false) + '</template></form>';
@@ -3095,8 +3130,7 @@
       const keepIds = new Set(b.items.filter((x) => depth(x) === 0).map((x) => x.id));
       const apply = (target, r) => {
         Object.assign(target, { code: r.code, name: r.name, qty: r.qty, unit: r.unit, amount: r.amount, vat: r.vat, glCode: r.glCode });
-        const g = db.master.glCodes.find((x) => x.code === r.glCode);
-        target.glName = g ? g.name : (target.glName || '');
+        target.glName = target.glName || '';
       };
       sections().forEach((sec) => {
         readRows(sec).forEach((r) => {
@@ -3751,20 +3785,14 @@
   function itemGl(b, it) {
     let n = it;
     while (n) {
-      if (n.glCode) return { code: n.glCode, name: n.glName || ((db.master.glCodes.find((g) => g.code === n.glCode) || {}).name || ''), own: n === it };
+      if (n.glCode) return { code: n.glCode, name: n.glName || '', own: n === it };
       n = b.type === 'CBS' ? parentOf(b, n) : null;
     }
     return { code: '', name: '', own: false };
   }
   /** GL ของบรรทัด: ที่บันทึกในบรรทัด หรือ GL ปัจจุบันของ Item (บัญชีใส่ทีหลัง) */
-  /** GL ตั้งต้นของหมวดค่าใช้จ่าย (ข้อมูลหลัก) */
-  const categoryGl = (name) => {
-    const c = (db.master.expenseCategories || []).find((x) => x.name === name);
-    const code = c && c.gl ? c.gl : '';
-    return { code, name: code ? ((db.master.glCodes.find((g) => g.code === code) || {}).name || name) : '' };
-  };
   const lineGl = (b, l) => (l.glCode ? { code: l.glCode, name: l.glName || '' }
-    : b.structure === 'project' && l.category ? categoryGl(l.category) : itemGl(b, itemById(b, l.itemId) || { code: '' }));
+    : b.structure === 'project' && l.category ? { code: '', name: '' } : itemGl(b, itemById(b, l.itemId) || { code: '' }));
   /** Item หลักของ OPEX ที่ยังไม่มี GL */
   const missingGl = (b) => (b.type === 'CBS' && b.structure !== 'project' ? b.items.filter((it) => isMainItem(b, it) && !it.glCode) : []);
   /** ฝ่ายบัญชี (ผู้คุมงบ) ใส่ / แก้ GL ได้ทุกเมื่อ ยกเว้นงบที่ยกเลิก */
@@ -3779,13 +3807,12 @@
       const ph = !it.glCode && inh.code ? 'ตาม Item แม่ (' + inh.code + ')' : '';
       return '<tr data-item="' + esc(it.id) + '" class="' + (isMainItem(b, it) ? 'parent-row' : '') + '"><td class="nowrap">' + esc(it.code) + '</td>' +
         '<td style="padding-left:' + (0.75 + depth(it) * 1.1) + 'rem">' + esc(it.name) + '</td>' +
-        '<td><input name="gl" list="glList" value="' + esc(it.glCode || '') + '" placeholder="' + esc(ph || (isMainItem(b, it) ? 'ยังไม่มี' : '')) + '" aria-label="GL Code ' + esc(it.code) + '"></td>' +
+        '<td><input name="gl" value="' + esc(it.glCode || '') + '" placeholder="' + esc(ph || (isMainItem(b, it) ? 'ยังไม่มี' : '')) + '" aria-label="GL Code ' + esc(it.code) + '"></td>' +
         '<td><input name="glName" value="' + esc(it.glName || '') + '" aria-label="GL Name ' + esc(it.code) + '"></td></tr>';
     }).join('');
     return '<div class="page-head"><div><h1>ใส่ GL Code · ' + esc(b.code) + '</h1><div class="page-sub">' + esc(b.name) +
       ' — ฝ่ายบัญชีใส่ GL ของแต่ละ Item ได้ทุกเมื่อ (ตอนตั้งงบไม่ต้องกรอก) · Item ย่อยที่เว้นว่างใช้ GL ของ Item แม่ · ใบเบิกใช้งบที่ยังไม่มี GL จะใช้ GL ล่าสุดของ Item</div></div></div>' +
       '<div id="formError"></div>' +
-      '<datalist id="glList">' + db.master.glCodes.map((g) => '<option value="' + esc(g.code) + '">' + esc(g.name) + '</option>').join('') + '</datalist>' +
       '<form id="glForm" data-id="' + b.id + '"><section class="card form-section"><div class="table-wrap"><table class="edit-table"><thead><tr><th style="width:6rem">รหัส</th><th>รายการ</th>' +
       '<th style="width:11rem">GL Code</th><th style="width:16rem">GL Name</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>' +
       '<div class="actions"><button class="btn primary" type="submit">บันทึก GL Code</button><a class="btn" data-back href="#/budget/' + b.id + '">ยกเลิก</a></div></form>';
@@ -3795,11 +3822,6 @@
     const form = document.getElementById('glForm');
     if (!form) return;
     const b = budgetById(form.dataset.id);
-    form.addEventListener('change', (e) => {
-      if (!e.target.matches('[name="gl"]')) return;
-      const g = db.master.glCodes.find((x) => x.code === e.target.value.trim());
-      if (g) e.target.closest('tr').querySelector('[name="glName"]').value = g.name;
-    });
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       let changed = 0;
@@ -3810,7 +3832,6 @@
         if ((it.glCode || '') !== code || (it.glName || '') !== name) changed += 1;
         it.glCode = code;
         it.glName = name;
-        if (code && !db.master.glCodes.some((g) => g.code === code)) db.master.glCodes.push({ code, name });
       });
       addHistory(b, 'บัญชีใส่ / แก้ GL Code', changed + ' รายการ', 'งบ ' + b.code);
       save();
@@ -3856,6 +3877,12 @@
     if (!name) return;
     db.master.suppliers = db.master.suppliers || [];
     if (!db.master.suppliers.some((x) => x.name === name)) db.master.suppliers.push({ name });
+    // โหมด Supabase: เพิ่มเข้าข้อมูลหลักกลางด้วย (ทุกคนเลือกชื่อนี้ได้) — เบื้องหลัง ไม่ขวางการส่งคำขอ
+    if (AUTH_REMOTE) {
+      window.RemoteApi.v2MasterAddSupplier(name).then((r) => {
+        if (r && Array.isArray(r.items)) { db.master.suppliers = r.items; masterMeta.suppliers = r.updatedAt; save(); }
+      }).catch((e) => console.warn('เพิ่ม Supplier เข้าข้อมูลหลักบนเซิร์ฟเวอร์ไม่สำเร็จ', e && e.message));
+    }
   };
 
   /** ตัวเลือกรายการ (เฉพาะรายการล่างสุด) พร้อมยอดคงเหลือ ไม่นับยอดที่คำขอนี้จองไว้เอง */
@@ -4893,7 +4920,6 @@
 
   /** ข้อมูลที่ระบบคำนวณให้ใน Memo (ยอดเงิน ครั้งที่ ฯลฯ) และค่าเริ่มต้นของช่องที่ผู้ขอกรอกเองได้ */
   function memoModel(b, r) {
-    const party = (c) => (db.master.memoParties || []).find((x) => x.code === c) || {};
     const cname = (c) => companyMap()[c] || c;
     const t = USE_TYPES[r.useType] || {};
     const perLine = b.structure !== 'project';
@@ -4908,7 +4934,6 @@
     r.lines.forEach((l) => { const c = lineInvestor(b, l); byInv[c] = round2((byInv[c] || 0) + l.amount); });
     const invCodes = Object.keys(byInv).sort((x, y) => byInv[y] - byInv[x]);
     const investor = invCodes[0] || b.company;
-    const approver = party(investor);
     const mp = r.memoParties || defaultMemoParties(b, investor);
 
     // ครั้งที่ และยอดที่เบิกไปแล้วก่อนหน้า
@@ -5477,25 +5502,12 @@
     { key: 'assetTypes', title: 'ประเภทสินทรัพย์ (CAPEX)', hint: 'ตัวเลือกประเภทสินทรัพย์ของรายการย่อย', lock: false,
       cols: [{ k: 'name', label: 'ประเภทสินทรัพย์' }],
       inUse: (it) => db.budgets.some((b) => b.type === 'CAPEX' && b.items.some((i) => i.assetType === it.name)),
-      rename: (from, to) => db.budgets.forEach((b) => b.items.forEach((i) => { if (b.type === 'CAPEX' && i.assetType === from) i.assetType = to; })) },
-    { key: 'expenseCategories', title: 'หมวดค่าใช้จ่าย', hint: 'GL ตั้งต้นของงบรวมโครงการ OPEX — ถ้าชื่อรายการที่ Business พิมพ์ตรงกับหมวดในนี้ ระบบใส่ GL ให้ (ตอนขอเบิกไม่ต้องเลือกหมวดแล้ว)', lock: false,
-      cols: [{ k: 'name', label: 'หมวดค่าใช้จ่าย' }, { k: 'gl', label: 'GL Code (ถ้ามี)', w: '12rem' }],
-      inUse: (it) => db.requests.some((r) => r.lines.some((l) => l.category === it.name)),
-      rename: (from, to) => db.requests.forEach((r) => r.lines.forEach((l) => { if (l.category === from) l.category = to; })) },
-    { key: 'memoParties', title: 'ผู้ลงนามใน Memo', lock: true,
-      hint: 'ใช้พิมพ์ Memo ขอเบิกใช้งบ ตั้งรายบริษัท — "เรียน / สำเนาถึง / ผู้ทบทวน" ใช้ของ <strong>บริษัทที่ลงทุน</strong> (ถ้าคำขอมีหลายบริษัทใช้ของบริษัทที่ลงทุนมากที่สุด) · "ผู้ลงนามเสนอ" ใช้ของ <strong>บริษัทเจ้าของงบ</strong> · ใช้เป็น <strong>ค่าเริ่มต้น</strong> ในฟอร์มคำขอ (ผู้ขอแก้ได้ต่อคำขอ) · ข้อมูลในโหมดทดลองเก็บในเบราว์เซอร์นี้เท่านั้น',
-      cols: [{ k: 'code', label: 'บริษัท', w: '7rem' }, { k: 'to', label: 'เรียน / ผู้พิจารณาอนุมัติ (หลายคนคั่นด้วย ;)', w: '15rem' }, { k: 'cc', label: 'สำเนาถึง (หลายคนคั่นด้วย ;)', w: '13rem' },
-        { k: 'reviewer', label: 'ผู้ทบทวน / ให้ความเห็นชอบ (หลายคนคั่นด้วย ;)', w: '15rem' }, { k: 'signer', label: 'ผู้ลงนามเสนอ (ชื่อ / ตำแหน่ง)', w: '15rem' }],
-      inUse: () => false },
-    { key: 'glCodes', title: 'GL Code (OPEX)', hint: 'เลือก GL Code ในรายการต้นทุน แล้วระบบเติมชื่อ GL ให้', lock: true,
-      cols: [{ k: 'code', label: 'GL Code', w: '10rem' }, { k: 'name', label: 'ชื่อ GL' }],
-      inUse: (it) => db.budgets.some((b) => b.type === 'CBS' && b.items.some((i) => i.glCode === it.code)) ||
-        db.requests.some((r) => r.type === 'CBS' && r.lines.some((l) => l.glCode === it.code)) }
+      rename: (from, to) => db.budgets.forEach((b) => b.items.forEach((i) => { if (b.type === 'CAPEX' && i.assetType === from) i.assetType = to; })) }
   ];
 
   /** เมนูย่อยของข้อมูลหลัก: [key, ชื่อเมนู] */
   const MASTER_NAV = [['companies', 'บริษัท'], ['departments', 'หน่วยงาน'], ['groups', 'กลุ่มงบประมาณ'], ['assetTypes', 'ประเภทสินทรัพย์'],
-    ['expenseCategories', 'หมวดค่าใช้จ่าย'], ['glCodes', 'GL Code'], ['memoParties', 'ผู้ลงนาม Memo'], ['suppliers', 'Supplier'], ['listGroups', 'กลุ่มรายการ'], ['priorityGroups', 'กลุ่ม Priority'], ['investGroups', 'กลุ่ม Priority การลงทุน']];
+    ['suppliers', 'Supplier'], ['listGroups', 'กลุ่มรายการ'], ['priorityGroups', 'กลุ่ม Priority'], ['investGroups', 'กลุ่ม Priority การลงทุน']];
 
   function masterRow(sec, it, isNew) {
     return '<tr data-orig="' + (isNew ? '' : esc(it[sec.cols[0].k])) + '">' + sec.cols.map((c, i) => (c.type === 'image'
@@ -5523,7 +5535,10 @@
       '<template>' + masterRow(sec, {}, true) + '</template>' +
       '<div class="actions"><button type="button" class="btn" data-m-add>+ เพิ่ม</button><button class="btn primary" type="submit">บันทึก' + sec.title + '</button></div></form></section>').join('');
 
-    return '<div class="page-head"><div><h1>' + esc(navTitle) + '</h1><div class="page-sub">ข้อมูลหลัก — ค่าที่ใช้เป็นตัวเลือกในฟอร์มและรายงาน</div></div></div>' + takeFlash() + adminTabsHtml('master') +
+    return '<div class="page-head"><div><h1>' + esc(navTitle) + '</h1><div class="page-sub">ข้อมูลหลัก — ค่าที่ใช้เป็นตัวเลือกในฟอร์มและรายงาน</div></div></div>' + takeFlash() +
+      (AUTH_REMOTE ? (masterOnline
+        ? '<div class="alert info small">ข้อมูลหลักเก็บบนเซิร์ฟเวอร์ — ทุกคนเห็นชุดเดียวกับที่บันทึกที่นี่ · การเช็กว่า "ลบได้ไหม" และการเปลี่ยนชื่อ ครอบคลุมเฉพาะงบที่เก็บในเครื่องนี้ (งบยังเก็บในเบราว์เซอร์ของแต่ละคนจนกว่าจะย้ายขึ้นเซิร์ฟเวอร์)</div>'
+        : '<div class="alert error small">เชื่อมข้อมูลหลักกับเซิร์ฟเวอร์ไม่ได้ — ' + esc(masterError || 'ยังไม่ได้โหลด') + ' · บันทึกไม่ได้จนกว่าจะเชื่อมต่อได้ (ถ้าเพิ่งอัปเดตระบบ ให้รัน supabase/schema_v2.sql ใน SQL Editor แล้วโหลดหน้าใหม่)</div>') : '') +
       '<div id="formError"></div><div class="form-main">' + sections +
       '</div>';
   }
@@ -5586,6 +5601,27 @@
         if (REMOTE) {
           const renames = sec.rename ? rows.filter((it) => it.orig && it.orig !== it[keyCol]).map((it) => ({ from: it.orig, to: it[keyCol] })) : [];
           if (!(await runAndReload(() => window.RemoteApi.saveMaster(sec.key, data, renames)))) return;
+        } else if (AUTH_REMOTE) {
+          // โหมด Supabase: บันทึกที่เซิร์ฟเวอร์ก่อน สำเร็จแล้วค่อยแก้ชื่อที่งบในเครื่อง
+          if (!masterOnline && !(await loadRemoteMaster().then(() => masterOnline, () => false))) { showErrors(['เชื่อมข้อมูลหลักกับเซิร์ฟเวอร์ไม่ได้ — ' + (masterError || 'ลองใหม่อีกครั้ง')]); return; }
+          let res = null;
+          document.body.classList.add('busy');
+          try {
+            res = { value: await window.RemoteApi.v2MasterSave(sec.key, data, masterMeta[sec.key] || null) };
+          } catch (ex) {
+            if (ex && ex.code === 'AUTH') { showLoginDemo('login', { error: ex.message }); return; }
+            // เช่น มีคนอื่นแก้ไปก่อน: โหลดค่าล่าสุดมาแสดง แล้วบอกให้แก้อีกครั้ง
+            await loadRemoteMaster().catch(() => false);
+            setFlash('error', (ex && ex.message) || 'บันทึกข้อมูลหลักไม่สำเร็จ');
+            go('#/master/' + sec.key);
+            return;
+          } finally {
+            document.body.classList.remove('busy');
+          }
+          if (sec.rename) rows.forEach((it) => { if (it.orig && it.orig !== it[keyCol]) sec.rename(it.orig, it[keyCol]); });
+          db.master[sec.key] = res.value.items;
+          masterMeta[sec.key] = res.value.updatedAt;
+          save();
         } else {
           if (sec.rename) rows.forEach((it) => { if (it.orig && it.orig !== it[keyCol]) sec.rename(it.orig, it[keyCol]); });
           db.master[sec.key] = data;
@@ -5602,20 +5638,7 @@
 
   /** บทบาทที่เห็นงบ/งานของคนอื่น (ต้องกำหนดบริษัทที่ดูได้) */
   const roleSeesWork = (role) => ['budget.view_all', 'budget.manage', 'budget.verify', 'request.decide', 'cut.record', 'po.record'].some((k) => (DEMO_ROLE_PERMS[role] || []).includes(k));
-  /** แท็บของหน้า Admin (แสดงตามสิทธิ์) — [key, href, ข้อความ] */
-  function adminTabsFor() {
-    const t = [];
-    if (can('user.manage')) t.push(['users', '#/admin', 'ผู้ใช้'], ['roles', '#/admin?tab=roles', 'บทบาทและสิทธิ์']);
-    if (can('master.manage')) t.push(['master', '#/master', 'ข้อมูลหลัก']);
-    if (can('log.view')) t.push(['log', '#/log', 'Log การทำงาน']);
-    return t;
-  }
   const adminResetCount = () => (!REMOTE && can('user.manage') ? USERS.filter((u) => accountState(u).key === 'reset_requested').length : 0);
-  function adminTabsHtml(active) {
-    return '<nav class="tabs" aria-label="หมวด Admin">' + adminTabsFor().map(([k, href, label]) =>
-      '<a href="' + href + '"' + (k === active ? ' class="active" aria-current="page"' : '') + '>' + label +
-      (k === 'users' && adminResetCount() ? ' <span class="tab-count">(' + adminResetCount() + ' ขอรีเซ็ต)</span>' : '') + '</a>').join('') + '</nav>';
-  }
 
   function viewAdmin(params) {
     if (!can('user.manage')) return '<div class="alert error">ไม่มีสิทธิ์จัดการผู้ใช้และสิทธิ์</div>';
@@ -6274,8 +6297,10 @@
 
   function viewAdminDemo(params) {
     const tab = params && params.get('tab') === 'roles' ? 'roles' : 'users';
-    return '<div class="page-head"><div><h1>Admin</h1><div class="page-sub">จัดการผู้ใช้ บทบาท และสิทธิ์ · ข้อมูลหลัก · Log การทำงาน — ' + (AUTH_REMOTE ? 'บัญชีและสิทธิ์เก็บบนเซิร์ฟเวอร์ (ข้อมูลหลักและ Log ยังเก็บในเบราว์เซอร์นี้)' : 'โหมดทดลองเก็บในเบราว์เซอร์นี้เท่านั้น') + '</div></div></div>' +
-      takeFlash() + adminTabsHtml(tab) + '<div id="formError"></div><div id="adminBox">' + (tab === 'roles' ? viewAdminRoles() : viewAdminUsers()) + '</div>';
+    const store = AUTH_REMOTE ? 'บัญชีและสิทธิ์เก็บบนเซิร์ฟเวอร์' : 'โหมดทดลองเก็บในเบราว์เซอร์นี้เท่านั้น';
+    return '<div class="page-head"><div><h1>' + (tab === 'roles' ? 'บทบาทและสิทธิ์' : 'ผู้ใช้') + '</h1><div class="page-sub">' +
+      (tab === 'roles' ? 'กำหนดว่าแต่ละบทบาททำอะไรได้บ้าง · สร้างบทบาทเพิ่มได้ — ' : 'เพิ่ม แก้ไข เปิด/ปิดใช้งานผู้ใช้ และรีเซ็ตรหัสผ่าน — ') + store + '</div></div></div>' +
+      takeFlash() + '<div id="formError"></div><div id="adminBox">' + (tab === 'roles' ? viewAdminRoles() : viewAdminUsers()) + '</div>';
   }
 
   function viewAdminUsers() {
@@ -6459,7 +6484,7 @@
     const who = params.get('by') || '';
     const list = (db.log || []).slice().reverse().filter((x) => (!who || x.by === who) &&
       (!q || (x.action + ' ' + x.ref + ' ' + x.detail).toLowerCase().includes(q)));
-    return '<div class="page-head"><div><h1>Log การทำงาน</h1><div class="page-sub">บันทึกทุกการกระทำในระบบ เพิ่มได้อย่างเดียว แก้หรือลบไม่ได้</div></div></div>' + adminTabsHtml('log') +
+    return '<div class="page-head"><div><h1>Log การทำงาน</h1><div class="page-sub">บันทึกทุกการกระทำในระบบ เพิ่มได้อย่างเดียว แก้หรือลบไม่ได้</div></div></div>' +
       '<form id="logFilter" class="admin-filters"><label class="input-wrap search">' + ICON_SEARCH + '<input name="q" type="search" placeholder="ค้นหาการกระทำ เลขที่ รายละเอียด" value="' + esc(params.get('q') || '') + '"></label>' +
       '<div class="select-wrap"><select name="by">' + opt('', 'ผู้ใช้: ทั้งหมด', who) + USERS.map((x) => opt(x.id, 'ผู้ใช้: ' + x.name, who)).join('') + '</select></div><button class="btn" type="submit">กรอง</button></form>' +
       '<div class="table-wrap"><table><thead><tr><th>เวลา</th><th>ผู้ใช้</th><th>การกระทำ</th><th>เรื่อง</th><th>รายละเอียด</th></tr></thead><tbody>' +
@@ -7101,17 +7126,17 @@
 
 
   // ---------------------------------------------------------------- ซิงก์ข้อมูลงบกับ Supabase (เฟส 2a)
-  // เก็บเป็นเอกสารรายตัว (master / budget / request / change) + Log · ฟังก์ชันบนฐานข้อมูล v2_load / v2_save_docs (supabase/schema_v2b.sql)
+  // เก็บเป็นเอกสารรายตัว (budget / request / change) + Log · ฟังก์ชันบนฐานข้อมูล v2_load / v2_save_docs (supabase/schema_v2b.sql)
+  // ข้อมูลหลัก (db.master) ไม่อยู่ในชั้นนี้ — เก็บแยกที่ v2_master (loadRemoteMaster / bindMaster)
   // แอปแก้ข้อมูลใน db แล้วเรียก save() ตามเดิม → save() ตั้งเวลาให้ syncPush() ส่งเฉพาะเอกสารที่เปลี่ยน (เทียบกับ snapshot ล่าสุดที่ตรงกับเซิร์ฟเวอร์)
   const SYNC_KINDS = [['budget', 'budgets'], ['request', 'requests'], ['change', 'changes']];
   const sync = { docs: new Map(), since: null, timer: null, retryTimer: null, pollTimer: null, inflight: false, again: false, status: 'idle', error: '' };
   const syncKey = (kind, id) => kind + ':' + id;
   const tokenRe = /@@NO:[A-Z]{2,10}-[0-9]{4}:[A-Za-z0-9]{4,24}@@/g;
 
-  /** เอกสารทั้งหมดในหน่วยความจำ → [{kind,id,obj}] (ข้อมูลหลักส่งได้เฉพาะผู้มีสิทธิ์จัดการข้อมูลหลัก) */
+  /** เอกสารทั้งหมดในหน่วยความจำ → [{kind,id,obj}] */
   function syncCollect() {
     const out = [];
-    if (can('master.manage') || sync.docs.has(syncKey('master', 'master'))) out.push({ kind: 'master', id: 'master', obj: db.master });
     SYNC_KINDS.forEach(([kind, col]) => (db[col] || []).forEach((o) => { if (o && o.id) out.push({ kind, id: o.id, obj: o }); }));
     return out;
   }
@@ -7137,12 +7162,11 @@
       const json = JSON.stringify(obj);
       const snap = sync.docs.get(key);
       if (snap && snap.json === json) return;
-      if (kind === 'master' && !can('master.manage')) return;
       docs.push({ kind, id, version: snap ? snap.version : 0, data: obj });
       jsons.set(key, json);
     });
     sync.docs.forEach((snap, key) => {
-      if (seen.has(key) || key === 'master:master') return;
+      if (seen.has(key)) return;
       const [kind, id] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
       docs.push({ kind, id, version: snap.version, deleted: true });
     });
@@ -7192,7 +7216,6 @@
       if (del) sync.docs.delete(key); else sync.docs.set(key, { version: d.version, json: replaceTokensStr(batch.jsons.get(key), tokens) });
     });
     if (hasTokens) {
-      replaceTokensDeep(db.master, tokens);
       SYNC_KINDS.forEach(([, col]) => (db[col] || []).forEach((o) => replaceTokensDeep(o, tokens)));
       batch.entries.forEach((e) => replaceTokensDeep(e, tokens));
     }
@@ -7228,14 +7251,12 @@
     if (full) {
       const shell = emptyDb();
       shell.budgets = []; shell.requests = []; shell.changes = []; shell.log = [];
-      const m = res.docs.find((d) => d.kind === 'master');
-      if (m) shell.master = m.data;
+      shell.master = db.master; // ข้อมูลหลักโหลดแยก (loadRemoteMaster) — ไม่แตะ
       SYNC_KINDS.forEach(([kind, col]) => { shell[col] = res.docs.filter((d) => d.kind === kind).map((d) => d.data); });
       shell.log = res.log.slice();
       db = migrate(shell);
       sync.docs = new Map();
-      res.docs.forEach((d) => { if (d.kind !== 'master') sync.docs.set(syncKey(d.kind, d.id), { version: d.version, json: '' }); });
-      if (m) sync.docs.set('master:master', { version: m.version, json: '' });
+      res.docs.forEach((d) => sync.docs.set(syncKey(d.kind, d.id), { version: d.version, json: '' }));
       changed = true;
     } else {
       res.docs.forEach((d) => {
@@ -7244,7 +7265,8 @@
         if (snap && snap.version === d.version) return; // ของเราเอง / ไม่เปลี่ยน
         const col = (SYNC_KINDS.find(([k]) => k === d.kind) || [])[1];
         const list = col ? db[col] : null;
-        const cur = d.kind === 'master' ? db.master : list && list.find((o) => o.id === d.id);
+        if (!list) return; // ชนิดที่ไม่รู้จัก
+        const cur = list.find((o) => o.id === d.id);
         if (cur && snap && JSON.stringify(cur) !== snap.json) return; // มีการแก้ไขในเครื่องที่ยังไม่ได้ส่ง — คงไว้ (ถ้าชนจะแจ้งตอนบันทึก)
         if (d.deleted) {
           if (list && cur) list.splice(list.indexOf(cur), 1);
@@ -7252,8 +7274,7 @@
           changed = true;
           return;
         }
-        if (d.kind === 'master') db.master = d.data;
-        else if (cur) list[list.indexOf(cur)] = d.data;
+        if (cur) list[list.indexOf(cur)] = d.data;
         else list.push(d.data);
         sync.docs.set(key, { version: d.version, json: '' });
         changed = true;
@@ -7273,7 +7294,7 @@
     return changed;
   }
   function syncCollectAll() {
-    const out = [{ kind: 'master', id: 'master', obj: db.master }];
+    const out = [];
     SYNC_KINDS.forEach(([kind, col]) => (db[col] || []).forEach((o) => { if (o && o.id) out.push({ kind, id: o.id, obj: o }); }));
     return out;
   }
@@ -7281,7 +7302,8 @@
   async function syncPoll() {
     if (!AUTH_REMOTE || !accountsReady || sync.inflight || document.visibilityState !== 'visible') return;
     try {
-      const changed = await syncPull(false);
+      let changed = await syncPull(false);
+      try { if (await loadRemoteMaster()) changed = true; } catch (e) { if (e && e.code === 'AUTH') throw e; }
       if (changed) syncRerender();
       await loadRemoteRoles();
       await refreshAccounts();
@@ -7385,6 +7407,7 @@
         USERS = [profileToUser(meRow)];
         await loadRemoteRoles();
         await refreshAccounts();
+        await loadRemoteMaster(); // ข้อมูลหลักบน Supabase (v2_master)
         await syncPull(true); // โหลดข้อมูลงบทั้งหมดที่ผู้ใช้เห็น
       }
     } catch (e) {
@@ -7590,6 +7613,17 @@
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') checkForUpdate();
     });
+    // โหมด Supabase: กลับมาที่แท็บแล้วโหลดข้อมูลหลักล่าสุด (คนอื่นอาจแก้ไว้) — ถ้าเปลี่ยนและไม่ได้กรอกฟอร์มอยู่ ให้วาดหน้าใหม่
+    if (AUTH_REMOTE) {
+      document.addEventListener('visibilitychange', async () => {
+        if (document.visibilityState !== 'visible' || !accountsReady || !window.RemoteApi.hasSession()) return;
+        let changed = false;
+        try { changed = await loadRemoteMaster(); } catch (e) { return; }
+        const ae = document.activeElement;
+        const typing = ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && document.getElementById('app').contains(ae);
+        if (changed && !typing && !isFormHash(location.hash || '')) { const y = window.scrollY; render(); window.scrollTo(0, y); }
+      });
+    }
     if (REMOTE) {
       document.body.classList.add('remote');
       const note = document.querySelector('.sidebar-note');
