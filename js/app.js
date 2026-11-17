@@ -33,7 +33,7 @@
     { id: 'adm1', email: 'adisorn@demo.test', name: 'อดิศร ดูแลระบบ', title: 'ผู้ดูแลระบบ (IT)', department: 'ฝ่าย IT', company: 'PBI', role: 'admin' }
   ];
   /** เปิดปุ่ม "เข้าด้วยบัญชีตัวอย่าง" ในหน้าล็อกอิน (โหมดทดลองเท่านั้น — ข้ามรหัสผ่านเพื่อทดสอบบทบาทต่างๆ) ปิดเมื่อใช้งานจริง */
-  const DEMO_QUICK_LOGIN = true;
+  const DEMO_QUICK_LOGIN = false;
   let USERS = DEMO_USERS.map((x) => Object.assign({ active: true, mustSetPassword: true, pwHash: '', pwSalt: '' }, x)); // โหมด Supabase: แทนที่ด้วยรายชื่อผู้ใช้จากฐานข้อมูล
   let remoteMe = null; // โหมด Supabase: ผู้ใช้ที่ล็อกอินอยู่ (null = ยังไม่ได้ล็อกอิน)
 
