@@ -107,6 +107,56 @@
     return r.body === undefined ? null : r.body;
   }
 
+  /** เรียกฟังก์ชันในฐานข้อมูลโดยไม่ต้องล็อกอิน (ใช้เฉพาะฟังก์ชันที่เปิดให้ anon เช่น v2_request_reset) */
+  async function rpcAnon(fn, args) {
+    const r = await http('/rest/v1/rpc/' + fn, { method: 'POST', headers: Object.assign(baseHeaders(), { Authorization: 'Bearer ' + CFG.supabaseAnonKey }), body: JSON.stringify(args || {}) });
+    if (!r.ok) throw new ApiError((r.body && (r.body.message || r.body.hint)) || 'ทำรายการไม่สำเร็จ (' + r.status + ')', r.status, r.body && r.body.code);
+    return r.body === undefined ? null : r.body;
+  }
+
+  /** เรียก Edge Function ด้วย token ของผู้ใช้ที่ล็อกอินอยู่ (ฟังก์ชันตรวจสิทธิ์เองอีกชั้น) */
+  async function invoke(name, body) {
+    if (!session) throw new ApiError('กรุณาเข้าสู่ระบบ', 401, 'AUTH');
+    if (session.expires_at - nowSec() < 60) await refresh();
+    const r = await http('/functions/v1/' + name, { method: 'POST', headers: Object.assign(baseHeaders(), { Authorization: 'Bearer ' + session.access_token }), body: JSON.stringify(body || {}) });
+    if (r.status === 401) { saveSession(null); throw new ApiError('หมดเวลาเข้าใช้งาน กรุณาเข้าสู่ระบบใหม่', 401, 'AUTH'); }
+    if (!r.ok) throw new ApiError((r.body && (r.body.message || r.body.error)) || 'ทำรายการไม่สำเร็จ (' + r.status + ')', r.status, 'FUNCTION');
+    return r.body;
+  }
+
+  /** ตั้ง / เปลี่ยนรหัสผ่านของผู้ใช้ที่ล็อกอินอยู่ (ใช้กับลิงก์ตั้งรหัสผ่านและหน้าบัญชีของฉัน) */
+  async function updatePassword(password) {
+    if (!session) throw new ApiError('กรุณาเข้าสู่ระบบ', 401, 'AUTH');
+    if (session.expires_at - nowSec() < 60) await refresh();
+    const r = await http('/auth/v1/user', { method: 'PUT', headers: Object.assign(baseHeaders(), { Authorization: 'Bearer ' + session.access_token }), body: JSON.stringify({ password }) });
+    if (!r.ok) {
+      const raw = (r.body && (r.body.msg || r.body.message || r.body.error_description)) || '';
+      if (/same.*password|different from the old/i.test(raw)) throw new ApiError('รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านเดิม', r.status, 'PASSWORD');
+      if (/weak|short|at least/i.test(raw)) throw new ApiError('รหัสผ่านไม่ปลอดภัยพอ — ใช้อย่างน้อย 8 ตัว มีทั้งตัวอักษรและตัวเลข', r.status, 'PASSWORD');
+      throw new ApiError(raw || 'ตั้งรหัสผ่านไม่สำเร็จ', r.status, 'PASSWORD');
+    }
+  }
+
+  /**
+   * ลิงก์ตั้งรหัสผ่าน (recovery) ของ Supabase พาผู้ใช้กลับมาที่ #access_token=...&type=recovery — รับ token นั้นเป็น session
+   * คืน 'recovery' | 'invite' ถ้าเป็นลิงก์ที่รับได้, { error } ถ้าลิงก์หมดอายุ/ใช้แล้ว, null ถ้าไม่ใช่ลิงก์ของ Supabase
+   */
+  function adoptSessionFromHash(hash) {
+    const h = String(hash || '');
+    if (!/^#(access_token|error)=/.test(h) && !/^#error_code=/.test(h)) return null;
+    const q = new URLSearchParams(h.slice(1));
+    if (q.get('error') || q.get('error_code')) return { error: /expired|invalid/i.test(q.get('error_description') || q.get('error_code') || '') ? 'ลิงก์หมดอายุหรือถูกใช้ไปแล้ว — ให้ผู้ดูแลระบบสร้างลิงก์ใหม่' : (q.get('error_description') || 'ลิงก์ไม่ถูกต้อง') };
+    const token = q.get('access_token');
+    let claims = {};
+    try { claims = JSON.parse(decodeURIComponent(escape(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))))); } catch (e) { return { error: 'ลิงก์ไม่ถูกต้อง' }; }
+    saveSession({
+      access_token: token, refresh_token: q.get('refresh_token') || '',
+      expires_at: Number(q.get('expires_at')) || (claims.exp || nowSec() + 3600),
+      user: { id: claims.sub, email: claims.email }
+    });
+    return q.get('type') === 'invite' ? 'invite' : 'recovery';
+  }
+
   window.RemoteApi = {
     enabled,
     ApiError,
@@ -114,6 +164,19 @@
     sessionUser: () => (session && session.user) || null,
     signIn,
     signOut,
+    updatePassword,
+    adoptSessionFromHash,
+    invoke,
+    // ---- ระบบบัญชีรอบใหม่ (supabase/schema_v2.sql)
+    v2Me: (login) => rpc('v2_me', { p_login: !!login }),
+    v2Directory: () => rpc('v2_directory'),
+    v2ListUsers: () => rpc('v2_list_users'),
+    v2UpdateUser: (u) => rpc('v2_update_user', { p_id: u.id, p_name: u.name, p_title: u.title || '', p_department: u.department || '', p_company: u.company || '', p_companies: u.companies || [], p_role: u.role }),
+    v2RequestReset: (email) => rpcAnon('v2_request_reset', { p_email: email }),
+    v2ListRoles: () => rpc('v2_list_roles'),
+    v2SaveRole: (r) => rpc('v2_save_role', { p_key: r.key, p_name: r.name, p_description: r.description || '', p_permissions: r.permissions || [] }),
+    v2DeleteRole: (key) => rpc('v2_delete_role', { p_key: key }),
+    adminUsers: (body) => invoke('v2-admin-users', body),
     me: () => rpc('app_me'),
     load: () => rpc('app_load'),
     saveMaster: (key, data, renames) => rpc('app_save_master', { p_key: key, p_data: data, p_renames: renames || [] }),
