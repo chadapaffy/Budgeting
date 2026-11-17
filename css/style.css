@@ -1171,3 +1171,4 @@ button.link { color: var(--brand); }
 .budget-form .detail-layout > * { min-width: 0; }
 @media (max-width: 720px) { .item-group .item-table, .groups-box .item-table { min-width: 420px; } }
 .type-pick.wide { flex-basis: 440px; }
+.stepper.stepper-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }

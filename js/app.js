@@ -50,7 +50,7 @@
     { key: 'budget.view_all', group: 'การมองเห็น', label: 'ดูงบและเอกสารของทุกคน', hint: 'ถ้าไม่มี จะเห็นเฉพาะงบที่ตนสร้าง/เป็นเจ้าของ' },
     { key: 'budget.create', group: 'Business', label: 'ขออนุมัติงบใหม่', hint: 'สร้างร่าง แนบมติที่ประชุม ส่งให้ผู้คุมงบเปิดใช้' },
     { key: 'request.create', group: 'Business', label: 'ขอเบิกใช้งบ / ขอเพิ่มงบ', hint: 'เฉพาะงบที่ตนเป็นเจ้าของ' },
-    { key: 'budget.verify', group: 'ผู้คุมงบ', label: 'ยืนยันเปิดใช้งบ / ยืนยันเพิ่มงบ', hint: 'ตรวจมติแล้วยืนยันหรือส่งกลับ' },
+    { key: 'budget.verify', group: 'ผู้คุมงบ', label: 'ตรวจอนุมัติงบ / ยืนยันเปิดใช้งบ / ยืนยันเพิ่มงบ', hint: 'ตรวจมติแล้วยืนยันหรือส่งกลับ' },
     { key: 'budget.adjust', group: 'ผู้คุมงบ', label: 'โยกงบ / ลดงบ', hint: 'โยกข้ามรายการหรือโครงการได้ ต้องระบุเหตุผล' },
     { key: 'budget.manage', group: 'ผู้คุมงบ', label: 'ลงงบประจำปี (สร้าง / Import Excel)', hint: 'ลงงบให้ Business ขอดำเนินการใช้งบครั้งแรก · ใส่ GL · จัดการ Item ย่อย' },
     { key: 'request.decide', group: 'ผู้คุมงบ', label: 'ตรวจสอบ / อนุมัติการเบิกใช้งบ', hint: 'ขอเกินงบรายการต้องใส่ Note' },
@@ -95,19 +95,37 @@
   };
   /**
    * สถานะของตัวงบ
-   * CAPEX (งบประจำปี): ผู้คุมงบลงงบ (สร้าง / Import Excel) → pending_open รอ Business ขอดำเนินการใช้งบครั้งแรก
-   *   → Business ทำ Memo ให้ผู้บริหารเซ็น แนบแล้วส่ง → open_review → ผู้คุมงบยืนยัน = active / ส่งกลับ = open_returned
-   * OPEX: Business สร้างเอง ร่าง → พิมพ์แบบฟอร์ม / ใช้เอกสารขออนุมัติของตน ส่งผู้บริหารอนุมัติเอง → แนบเอกสารอนุมัติในระบบแล้วกด "ขอดำเนินการใช้งบ" = active ทันที (ไม่ผ่านผู้คุมงบ)
-   * (CAPEX ที่ Business ขอตั้งงบใหม่เองก็ใช้ทางเดียวกับ OPEX: ร่าง → แนบมติ → ผู้คุมงบยืนยัน)
+   * ขั้นตอนหลัก (CAPEX / OPEX เหมือนกัน — ดู FLOW_BU / FLOW_CTL):
+   *   Business สร้าง: draft / returned (สร้างงบประมาณ) → review รออนุมัติ (ผู้คุมงบตรวจเอกสารอนุมัติที่เซ็นนอกระบบ ผ่าน = pending_open / ส่งกลับ = returned)
+   *     → pending_open · open_review · open_returned (เปิดใช้: CAPEX ส่ง Memo ให้ผู้คุมงบยืนยัน · OPEX Business กดขอดำเนินการใช้งบ) → active
+   *   ผู้คุมงบสร้าง / Import: pending_open (สร้างงบประมาณ) → เปิดใช้ → active
    */
   const BUDGET_STATE = {
-    draft: 'ร่าง', review: 'รอผู้คุมงบตรวจสอบ', returned: 'ส่งกลับแก้ไข',
+    draft: 'ร่าง', review: 'รออนุมัติ', returned: 'ส่งกลับแก้ไข',
     pending_open: 'ยังไม่เปิดใช้งบ', open_review: 'รอผู้คุมงบตรวจ Memo ขอดำเนินการใช้งบ', open_returned: 'ส่งกลับแก้ Memo ขอดำเนินการใช้งบ',
     active: 'เปิดใช้งบ', cancelled: 'ยกเลิก'
   };
   const BUDGET_STATE_BADGE = { draft: 'draft', review: 'pending', returned: 'rejected', pending_open: 'draft', open_review: 'pending', open_returned: 'rejected', active: 'approved', cancelled: 'cancelled' };
   /** งบที่ผู้คุมงบลงไว้ ยังรอ Business ขอดำเนินการใช้งบครั้งแรก (Business ทำ Memo / ขอดำเนินการใช้งบได้) */
   const waitingOpen = (b) => b.state === 'pending_open' || b.state === 'open_returned';
+  /**
+   * ขั้นตอนหลักของงบ (CAPEX / OPEX เหมือนกัน)
+   *   Business สร้าง: สร้างงบประมาณ (ร่าง / ส่งกลับแก้ไข) → อนุมัติ (รออนุมัติ — ผู้คุมงบตรวจเอกสารอนุมัติที่ผู้อนุมัติเซ็นนอกระบบ ผ่าน / ส่งกลับ)
+   *     → เปิดใช้ (ยังไม่เปิดใช้งบ → ส่ง Memo → รอผู้คุมงบตรวจ Memo) → จบเมื่อเปิดใช้งบ
+   *   ผู้คุมงบสร้าง / Import: สร้างงบประมาณ → เปิดใช้ (เหมือนข้างบน) — ไม่มีขั้นอนุมัติ
+   */
+  const FLOW_BU = ['สร้างงบประมาณ', 'อนุมัติ', 'เปิดใช้'];
+  const FLOW_CTL = ['สร้างงบประมาณ', 'เปิดใช้'];
+  /** งบนี้อยู่ในขั้น "เปิดใช้" ได้ (ผู้คุมงบสร้าง หรือ Business สร้างแล้วผู้คุมงบอนุมัติแล้ว) */
+  const openFlow = (b) => !!(b.setup || b.opening);
+  const flowIndex = (b, setup) => {
+    const st = b.state || 'active';
+    if (st === 'cancelled') return -1;
+    if (st === 'active') return (setup ? FLOW_CTL : FLOW_BU).length;
+    if (st === 'pending_open' || st === 'open_review' || st === 'open_returned') return setup ? 1 : 2;
+    if (st === 'review') return 1;
+    return 0;
+  };
   /** ประเภทการเบิกใช้งบ (CAPEX) และจังหวะที่ตัดงบจริง */
   const USE_TYPES = {
     prpo: { label: 'ซื้อโดยเปิด PR / PO', short: 'PR/PO', cut: 'ตัดงบเมื่อจัดซื้อออก PO (ตามยอด PO)', who: 'จัดซื้อ' },
@@ -1314,10 +1332,9 @@
       '<span><strong>' + title + '</strong><small>' + sub + '</small></span></label>';
     const finNames = uniq(USERS.filter((x) => permsOf(x).includes('budget.manage')).map((x) => x.name).concat(db.budgets.map((x) => x.financeOwner).filter(Boolean)).concat(v.financeOwner ? [v.financeOwner] : []));
     const introFor = (type) => (setup
-      ? 'ผู้คุมงบสร้างงบให้ Business (หรือ Import Excel) — บันทึกแล้วงบรอ Business เจ้าของงบ ขอดำเนินการใช้งบ' + (type === 'CAPEX' ? ' (ทำ Memo ให้ผู้บริหารเซ็น แล้วผู้คุมงบยืนยัน)' : ' (เปิดใช้ได้ทันที)')
-      : type === 'CBS' ? 'เริ่มจากบันทึกร่าง แล้วพิมพ์แบบฟอร์ม หรือใช้เอกสารขออนุมัติของตนเอง เสนอผู้บริหารอนุมัติ'
-        : 'เริ่มจากบันทึกร่าง แล้วพิมพ์แบบฟอร์มเพื่อนำเข้าที่ประชุมอนุมัติ');
-    const steps = setup ? ['สร้างงบประมาณ', 'รอ Business ขอดำเนินการใช้งบ', 'เปิดใช้งบ'] : ['สร้างงบประมาณ', 'รออนุมัติงบ', 'ยืนยันการเปิดใช้งบ'];
+      ? 'ผู้คุมงบสร้างงบให้ Business (หรือ Import Excel) — บันทึกแล้วงบรอ Business เจ้าของงบ เปิดใช้งบ' + (type === 'CAPEX' ? ' (ทำ Memo ให้ผู้บริหารเซ็น แล้วผู้คุมงบยืนยัน)' : '')
+      : 'เริ่มจากบันทึกร่าง แล้วพิมพ์แบบฟอร์มให้ผู้อนุมัติเซ็นนอกระบบ → แนบเอกสารส่งให้ผู้คุมงบตรวจ (อนุมัติ) → เปิดใช้งบ');
+    const flow = setup ? FLOW_CTL : FLOW_BU;
     const stateText = b ? (b.incomplete ? 'ร่าง (ยังกรอกไม่ครบ)' : BUDGET_STATE[b.state] || '') : 'สร้างงบ';
     const title = b ? 'แก้ไขงบ ' + esc(b.code) : 'สร้างงบประมาณ';
     const copyPanel = copyList.length
@@ -1385,7 +1402,7 @@
 
     return '<div class="page-head"><div><h1>' + title + '</h1><div class="page-sub" id="budgetIntro" data-capex="' + esc(introFor('CAPEX')) + '" data-cbs="' + esc(introFor('CBS')) + '">' + introFor(v.type) + '</div></div>' +
       (copyList.length ? '<div class="head-actions"><button type="button" class="btn" id="copyToggle">คัดลอกงบอื่น</button></div>' : '') + '</div>' +
-      '<ol class="stepper stepper-3">' + steps.map((label, i) => '<li class="' + (i === 0 ? 'current' : '') + '"><span>' + (i + 1) + '</span>' + label + '</li>').join('') + '</ol>' +
+      stepperHtml(flow, 0) +
       copyPanel + copyNote +
       '<div id="formError"></div>' +
       '<form id="budgetForm" class="budget-form" data-id="' + esc(id || '') + '" data-mode="' + mode + '">' +
@@ -1675,25 +1692,12 @@
       (items.length ? '<ol class="timeline">' + items.map((h) => tlItem('done', esc(h.action), esc(userName(h.by)) + ' · ' + fmtDate(h.at), h.note)).join('') + '</ol>'
         : '<p class="muted">ยังไม่มีประวัติ</p>') + '</div>';
   }
-  /** แถบขั้นตอนของวงจรงบ */
+  /** แถบขั้นตอนของวงจรงบ (ชุดเดียวกับหน้าสร้างงบ) */
+  const stepperHtml = (labels, idx) => '<ol class="stepper stepper-' + labels.length + '">' + labels.map((label, i) =>
+    '<li class="' + (i < idx ? 'done' : i === idx ? 'current' : '') + '"><span>' + (i + 1) + '</span>' + label + '</li>').join('') + '</ol>';
   function budgetStepper(b) {
-    const st = b.state || 'active';
-    if (b.setup) {
-      const capex = b.type === 'CAPEX';
-      const ss = capex
-        ? [['ผู้คุมงบลงงบ'], ['Business ทำ Memo ให้ผู้บริหารเซ็น'], ['ผู้คุมงบตรวจ Memo'], ['เปิดใช้งบ']]
-        : [['ผู้คุมงบลงงบ'], ['Business ขอดำเนินการใช้งบ'], ['เปิดใช้งบ']];
-      const ix = st === 'active' ? ss.length - 1 : st === 'open_review' ? 2 : st === 'cancelled' ? -1 : 1;
-      return '<ol class="stepper">' + ss.map(([label], i) => '<li class="' + (i < ix ? 'done' : i === ix ? 'current' : '') + '"><span>' + (i + 1) + '</span>' + label + '</li>').join('') + '</ol>';
-    }
-    if (b.type === 'CBS' && st !== 'review' && st !== 'returned') {
-      const os = [['ร่างงบ OPEX'], ['ผู้บริหารอนุมัติ / แนบเอกสาร'], ['เปิดใช้งบ']];
-      const oi = { draft: 0, active: 2, cancelled: -1 }[st];
-      return '<ol class="stepper">' + os.map(([label], i) => '<li class="' + (i < oi ? 'done' : i === oi ? 'current' : '') + '"><span>' + (i + 1) + '</span>' + label + '</li>').join('') + '</ol>';
-    }
-    const steps = [['draft', 'ร่างคำขอ'], ['meeting', apprOf(b.type).step], ['review', 'ผู้คุมงบตรวจสอบ'], ['active', 'เปิดใช้งบ']];
-    const idx = { draft: 0, returned: 0, review: 2, active: 3, cancelled: -1 }[st];
-    return '<ol class="stepper">' + steps.map(([k, label], i) => '<li class="' + (i < idx ? 'done' : i === idx ? 'current' : '') + '"><span>' + (i + 1) + '</span>' + label + '</li>').join('') + '</ol>';
+    const setup = !!b.setup;
+    return stepperHtml(setup ? FLOW_CTL : FLOW_BU, flowIndex(b, setup));
   }
 
   function viewBudgetDetail(id) {
@@ -1724,13 +1728,13 @@
     if (state !== 'cancelled' && ((own && can('budget.create')) || (!can('budget.create') && can('budget.manage')))) actions.push('<a class="btn" href="#/budget/new?copy=' + b.id + '">คัดลอกเป็นงบใหม่</a>');
     const setupEdit = b.setup && waitingOpen(b) && can('budget.manage');
     if (setupEdit) actions.push('<a class="btn" href="#/budget/' + b.id + '/edit">แก้ไขงบ</a>');
-    if (b.setup && b.openMemo && b.type === 'CAPEX' && (own || canViewAll())) actions.push('<a class="btn" href="#/budget/' + b.id + '/memo' + (canEditOpenMemo(b) ? '' : '?view=1') + '">Memo ขอดำเนินการใช้งบ</a>');
+    if (openFlow(b) && b.openMemo && b.type === 'CAPEX' && (own || canViewAll())) actions.push('<a class="btn" href="#/budget/' + b.id + '/memo' + (canEditOpenMemo(b) ? '' : '?view=1') + '">Memo ขอดำเนินการใช้งบ</a>');
     if (!b.setup && (own || canViewAll())) actions.push('<a class="btn" href="#/budget/' + b.id + '/form">พิมพ์แบบฟอร์มขออนุมัติ</a>');
     if (manageSub) actions.push('<a class="btn" href="#/budget/' + b.id + '/items">จัดการ Item ย่อย</a>');
     if (canEditGl(b)) actions.push('<a class="btn" href="#/budget/' + b.id + '/gl">ใส่ GL Code</a>');
     if (canPlanCashflow(b)) actions.push('<a class="btn" href="#/budget/' + b.id + '/cashflow">' + (hasCashflow(b) ? 'แก้ไข Plan Cashflow' : 'วาง Plan Cashflow') + '</a>');
     if (active && can('budget.adjust')) actions.push('<a class="btn" href="#/adjust?budget=' + b.id + '">ปรับปรุงงบ</a>');
-    if (editable || setupEdit) actions.push('<button type="button" class="btn bad" id="cancelBudget">' + (setupEdit ? 'ยกเลิกงบ' : 'ยกเลิกคำขอ') + '</button>');
+    if (editable || setupEdit) actions.push('<button type="button" class="btn bad" id="cancelBudget">ยกเลิกงบ</button>');
     let html = '<div class="page-head detail-head"><div>' +
       '<div class="eyebrow">' + (isCapex ? 'งบลงทุน' : 'งบดำเนินงาน') + ' · ' + badge(b.type, TYPE_SHORT[b.type]) + ' ' + esc(b.code) +
       ' · ' + budgetStateBadge(b) + '</div>' +
@@ -1738,16 +1742,19 @@
       (actions.length ? '<div class="head-actions">' + actions.join('') + '</div>' : '') + '</div>' + takeFlash();
 
     if (!active) {
+      const owner = ownerLabel(b);
       const msg = {
-        draft: own ? (isCapex ? 'ร่างนี้ยังไม่ได้ส่ง — พิมพ์แบบฟอร์มเข้าที่ประชุม เมื่อที่ประชุมอนุมัติแล้ว แนบมติและส่งให้ผู้คุมงบด้านล่าง (ร่างค้างไว้ได้ไม่จำกัดเวลา)'
-          : 'ร่างนี้ยังไม่ได้ส่ง — พิมพ์แบบฟอร์มของระบบ หรือใช้เอกสารขออนุมัติของคุณเอง ส่งผู้บริหารอนุมัติ (ไม่ต้องเข้าบอร์ด) เมื่อผู้บริหารอนุมัติแล้ว นำเอกสารอนุมัติกลับมาแนบด้านล่าง แล้วกด "ขอดำเนินการใช้งบ" งบจะเปิดใช้ทันที (ร่างค้างไว้ได้ไม่จำกัดเวลา)') : 'ร่างของ Business ยังไม่ได้ส่งตรวจ',
+        draft: own ? (isCapex ? 'ร่างนี้ยังไม่ได้ส่ง — พิมพ์แบบฟอร์มเข้าที่ประชุม เมื่อผู้อนุมัติเซ็นแล้ว แนบมติและส่งให้ผู้คุมงบตรวจสอบด้านล่าง (ร่างค้างไว้ได้ไม่จำกัดเวลา)'
+          : 'ร่างนี้ยังไม่ได้ส่ง — พิมพ์แบบฟอร์มของระบบ หรือใช้เอกสารขออนุมัติของคุณเอง ให้ผู้อนุมัติเซ็น แล้วแนบเอกสารและส่งให้ผู้คุมงบตรวจสอบด้านล่าง (ร่างค้างไว้ได้ไม่จำกัดเวลา)')
+          : 'ร่างนี้ยังไม่ได้ส่ง (' + owner + ' ยังกรอกอยู่)',
         returned: 'ผู้คุมงบส่งกลับให้แก้ไข: ' + (b.returnReason || ''),
-        review: (isCapex ? 'แนบมติแล้ว' : 'แนบเอกสารอนุมัติผู้บริหารแล้ว') + ' รอผู้คุมงบตรวจสอบและยืนยันเปิดใช้งบ',
-        pending_open: own ? (isCapex ? 'ผู้คุมงบลงงบนี้ให้คุณแล้ว — ขอดำเนินการใช้งบครั้งแรกโดยทำ Memo ให้ผู้บริหารเซ็น แนบไฟล์ที่เซ็นแล้ว และส่งให้ผู้คุมงบยืนยัน (ด้านล่าง)'
-          : 'ผู้คุมงบลงงบนี้ให้คุณแล้ว — กด "ขอดำเนินการใช้งบ" ด้านล่างเพื่อเริ่มใช้งบ (OPEX ไม่ต้องทำ Memo)') : 'รอ ' + ownerLabel(b) + ' ขอดำเนินการใช้งบ' + (isCapex ? ' (ทำ Memo ให้ผู้บริหารเซ็น)' : ''),
-        open_review: 'แนบ Memo ที่ผู้บริหารเซ็นแล้ว รอผู้คุมงบตรวจ Memo และยืนยันขอดำเนินการใช้งบ',
-        open_returned: 'ผู้คุมงบส่ง Memo ขอดำเนินการใช้งบกลับให้แก้ไข: ' + (b.returnReason || ''),
-        cancelled: b.setup ? 'งบนี้ถูกยกเลิกแล้ว' : 'คำขออนุมัติงบนี้ถูกยกเลิกแล้ว'
+        review: 'ส่งแล้ว — รอผู้คุมงบตรวจ' + (isCapex ? 'มติ' : 'เอกสารอนุมัติ') + 'ว่าผ่านหรือส่งกลับ (ผู้อนุมัติเซ็นเอกสารนอกระบบ)',
+        pending_open: own
+          ? (b.setup ? 'ผู้คุมงบสร้างงบนี้ให้คุณแล้ว — ' : 'ผู้คุมงบตรวจผ่านแล้ว — ') + (isCapex ? 'เปิดใช้งบโดยทำ Memo ให้ผู้บริหารเซ็น แนบไฟล์ที่เซ็นแล้ว และส่งให้ผู้คุมงบยืนยัน (ด้านล่าง)' : 'กด "ขอดำเนินการใช้งบ" ด้านล่างเพื่อเปิดใช้งบ')
+          : 'รอ ' + owner + ' เปิดใช้งบ' + (isCapex ? ' (ทำ Memo ให้ผู้บริหารเซ็น แล้วส่งให้ผู้คุมงบตรวจ)' : ''),
+        open_review: 'แนบ Memo ที่ผู้บริหารเซ็นแล้ว รอผู้คุมงบตรวจ Memo และยืนยันเปิดใช้งบ',
+        open_returned: 'ผู้คุมงบส่ง Memo กลับให้แก้ไข: ' + (b.returnReason || ''),
+        cancelled: 'งบนี้ถูกยกเลิกแล้ว'
       }[state];
       html += '<div class="card stepper-card">' + budgetStepper(b) + '<p class="' + (state === 'returned' || state === 'open_returned' ? 'neg' : 'muted') + '">' + esc(msg) + '</p></div>';
     }
@@ -1858,14 +1865,16 @@
         '<label class="field full"><span>' + ap.note + '</span><input name="meetingNote" placeholder="เช่น อนุมัติเต็มจำนวน / อนุมัติบางส่วน" value="' + esc((b.meeting && b.meeting.note) || '') + '"></label></div>' +
         '<div class="field"><span>' + ap.file + ' (PDF หรือรูปภาพ)</span>' + attachList(b.attachments, { del: true, empty: ap.empty }) +
         '<label class="btn small file-btn">+ แนบไฟล์<input type="file" id="budgetFiles" accept="application/pdf,image/png,image/jpeg" multiple hidden></label></div>' +
-        '<div class="actions"><button class="btn primary" type="submit">' + (b.type === 'CBS' ? 'ขอดำเนินการใช้งบ' : 'ส่งให้ผู้คุมงบตรวจสอบ') + '</button><button class="btn" type="button" id="saveMeeting">บันทึกข้อมูล' + (ap.exec ? 'การอนุมัติ' : 'มติ') + 'ไว้ก่อน</button></div></form>';
+        '<div class="actions"><button class="btn primary" type="submit">ส่งให้ผู้คุมงบตรวจสอบ</button><button class="btn" type="button" id="saveMeeting">บันทึกข้อมูล' + (ap.exec ? 'การอนุมัติ' : 'มติ') + 'ไว้ก่อน</button></div></form>';
     } else {
       evidence += (b.meeting && b.meeting.no
         ? '<p>' + esc(b.meeting.no) + apprMetaText(ap, b.meeting) + (b.meeting.note ? ' · ' + esc(b.meeting.note) : '') + '</p>'
         : '<p class="muted">' + ap.none + '</p>') + attachList(b.attachments, { empty: ap.empty });
     }
     evidence += '</section>';
+    // ขั้น "เปิดใช้": งบที่ผู้คุมงบสร้าง แสดงเฉพาะส่วนเปิดใช้ · งบที่ Business สร้าง แสดงหลักฐานการอนุมัติควบคู่ด้วย
     if (b.setup) evidence = openSection(b, own);
+    else if (b.opening && !active) evidence = evidence + openSection(b, own);
 
     const chgList = chgs.length
       ? '<h2>คำขอเพิ่มงบ <span class="muted count-note">(' + chgs.length + ')</span></h2><div class="table-wrap"><table><thead><tr><th>เลขที่</th><th>เหตุผล</th><th class="num">ขอเพิ่ม</th><th>สถานะ</th></tr></thead><tbody>' +
@@ -1897,10 +1906,10 @@
         '<p class="muted small-note" style="margin:var(--s-2) 0 0">สถานะ: ' + esc(BUDGET_STATE[state]) + '</p></div>';
     }
     if (state === 'review' && can('budget.verify')) {
-      side += '<div class="card decision"><h3 class="side-title">' + ap.verify + 'และเปิดใช้งบ</h3>' +
+      side += '<div class="card decision"><h3 class="side-title">' + ap.verify + ' (อนุมัติงบ)</h3>' +
         '<p class="muted small-note" style="margin:0 0 var(--s-3)">ตรวจว่า' + (ap.exec ? 'เอกสารอนุมัติของผู้บริหาร' : 'มติ') + 'ตรงกับวงเงินและรายการในคำขอ ผู้คุมงบแก้ตัวงบไม่ได้ ถ้าไม่ตรงให้ส่งกลับ</p>' +
         '<form id="verifyBudget" data-id="' + b.id + '"><label class="field"><span>หมายเหตุ (จำเป็นเมื่อส่งกลับ)</span><textarea name="comment" rows="3"></textarea></label>' +
-        '<div class="actions"><button class="btn primary" type="submit" data-verify="active">ยืนยันเปิดใช้งบ</button>' +
+        '<div class="actions"><button class="btn primary" type="submit" data-verify="active">ตรวจผ่าน (อนุมัติ)</button>' +
         '<button class="btn bad" type="submit" data-verify="returned">ส่งกลับให้แก้ไข</button></div></form></div>';
     }
     if (state === 'open_review' && can('budget.verify')) {
@@ -1934,7 +1943,7 @@
     if (cancel) {
       cancel.addEventListener('click', () => {
         const b = budgetById(location.hash.split('/')[2]);
-        const what = b && b.setup ? 'งบ' : 'คำขออนุมัติงบ';
+        const what = 'งบ';
         if (!b || !confirm('ยกเลิก' + what + ' ' + b.code + ' ?')) return;
         b.state = 'cancelled';
         addHistory(b, 'ยกเลิก' + what, '', 'งบ ' + b.code);
@@ -1985,17 +1994,6 @@
         if (ap.exec && !b.meeting.by) errors.push('กรุณาระบุ' + ap.by);
         if (!b.attachments.length) errors.push('กรุณาแนบ' + ap.file);
         if (errors.length) { alert(errors.join('\n')); return; }
-        if (b.type === 'CBS') {
-          // OPEX: เอกสารอนุมัติของผู้บริหารอยู่ครบ → เปิดใช้งบทันที ไม่ผ่านผู้คุมงบ
-          if (!confirm('ขอดำเนินการใช้งบ ' + b.code + ' วงเงิน ' + money(budgetTotal(b)) + ' บาท ตามเอกสารอนุมัติ ' + b.meeting.no + ' ?')) return;
-          b.submittedAt = new Date().toISOString();
-          activateBudget(b, me().id, 'Business ขอดำเนินการใช้งบตามเอกสารอนุมัติผู้บริหาร ' + b.meeting.no + (b.meeting.by ? ' (' + b.meeting.by + ')' : ''));
-          addHistory(b, 'แนบเอกสารอนุมัติผู้บริหารและขอดำเนินการใช้งบ', b.meeting.no + (b.meeting.by ? ' · ' + b.meeting.by : ''), 'งบ ' + b.code);
-          save();
-          setFlash('success', 'ขอดำเนินการใช้งบ ' + b.code + ' แล้ว — ขอเบิกใช้งบได้');
-          go('#/budget/' + b.id);
-          return;
-        }
         b.state = 'review';
         b.submittedAt = new Date().toISOString();
         addHistory(b, ap.exec ? 'แนบเอกสารอนุมัติผู้บริหารและส่งให้ผู้คุมงบตรวจสอบ' : 'แนบมติที่ประชุมและส่งให้ผู้คุมงบตรวจสอบ', b.meeting.no, 'งบ ' + b.code);
@@ -2028,10 +2026,10 @@
           return;
         }
         if (decision === 'active') {
-          Object.assign(b, { state: 'active', activatedAt: at, activatedBy: me().id, returnReason: '' });
-          b.revisions = [{ no: 0, at, by: me().id, note: 'เปิดใช้งบตาม' + ((b.meeting && b.meeting.no) || apprOf(b.type).short) + (comment ? ' — ' + comment : ''), total: budgetTotal(b), items: snapshotItems(b) }];
-          addHistory(b, 'ยืนยันเปิดใช้งบ', comment, 'งบ ' + b.code);
-          setFlash('success', 'เปิดใช้งบ ' + b.code + ' แล้ว — Business ขอเบิกใช้งบได้');
+          // ตรวจผ่าน = อนุมัติ → เข้าขั้น "เปิดใช้" (Business ขอดำเนินการใช้งบ: CAPEX ส่ง Memo ให้ผู้คุมงบยืนยัน)
+          Object.assign(b, { state: 'pending_open', opening: true, approvedAt: at, approvedBy: me().id, returnReason: '' });
+          addHistory(b, 'ผู้คุมงบตรวจผ่าน (อนุมัติ) — รอ Business เปิดใช้งบ', comment, 'งบ ' + b.code);
+          setFlash('success', 'ตรวจผ่านงบ ' + b.code + ' แล้ว — รอ ' + userName(b.ownerId) + ' เปิดใช้งบ' + (b.type === 'CAPEX' ? ' (ทำ Memo ให้ผู้บริหารเซ็น)' : ''));
         } else {
           Object.assign(b, { state: 'returned', returnReason: comment });
           addHistory(b, 'ส่งกลับให้แก้ไข', comment, 'งบ ' + b.code);
@@ -2052,7 +2050,7 @@
     b.revisions = [{ no: 0, at, by, note, total: budgetTotal(b), items: snapshotItems(b) }];
   }
   /** Business เจ้าของงบทำ Memo / กดขอดำเนินการใช้งบได้ */
-  const canOpenBudget = (b) => b.setup && waitingOpen(b) && b.ownerId === me().id && can('request.create');
+  const canOpenBudget = (b) => openFlow(b) && waitingOpen(b) && b.ownerId === me().id && can('request.create');
   const canEditOpenMemo = (b) => b.type === 'CAPEX' && canOpenBudget(b);
 
   /** ส่วน "ขอดำเนินการใช้งบครั้งแรก" ในหน้างบ */
@@ -2217,7 +2215,7 @@
   function viewOpenMemo(id, params) {
     const b = budgetById(id);
     if (!b) return notFound();
-    if (!b.setup || b.type !== 'CAPEX') return '<div class="alert error">Memo ขอดำเนินการใช้งบใช้กับงบ CAPEX ที่ผู้คุมงบลงไว้เท่านั้น</div>';
+    if (!openFlow(b) || b.type !== 'CAPEX') return '<div class="alert error">Memo ขอดำเนินการใช้งบใช้กับงบ CAPEX ที่ถึงขั้นเปิดใช้งบแล้วเท่านั้น</div>';
     const editable = canEditOpenMemo(b);
     if (!b.openMemo && !editable) return '<div class="alert info">ยังไม่มี Memo ขอดำเนินการใช้งบ</div>';
     if (editable && !(params && params.get('view'))) {
@@ -3584,8 +3582,8 @@
 
     const side = '<div class="card total-card"><h3 class="side-title">สรุปคำขอเบิก</h3><span class="muted">ยอดขอใช้ครั้งนี้ (รวม VAT)</span>' +
       '<div class="total-amount"><span id="sideTotal">0.00</span> <small>บาท</small></div>' +
-      '<dl class="kv compact"><dt>งบคงเหลือทั้งโครงการ</dt><dd>' + moneyCell(remaining) + '</dd>' +
-      '<dt>คงเหลือหลังขอใช้</dt><dd id="sideAfter">' + moneyCell(remaining) + '</dd></dl>' +
+      '<dl class="kv compact"><dt>งบคงเหลือทั้งโครงการ</dt><dd>' + moneyCell(projRemain) + '</dd>' +
+      '<dt>คงเหลือหลังขอใช้</dt><dd id="sideAfter">' + moneyCell(projRemain) + '</dd></dl>' +
       '<div class="actions side-actions">' +
       '<button class="btn primary tall" type="submit" data-action="send"' + (needMemo ? ' hidden' : '') + '>' + (existing && existing.status === 'rejected' ? 'ส่งให้ผู้คุมงบตรวจสอบอีกครั้ง' : 'ส่งให้ผู้คุมงบตรวจสอบ') + '</button>' +
       (memoOk ? '<button class="btn primary tall" type="submit" data-action="memo"' + (needMemo ? '' : ' hidden') + '>' + (existing && existing.status === 'memo' ? 'บันทึกและออก Memo ใหม่' : 'ทำ Memo ให้ผู้บริหารเซ็นก่อนส่ง') + '</button>' : '') +
@@ -3593,7 +3591,9 @@
       (memoOk ? '<p class="muted memo-side-note" id="memoNote"' + (needMemo ? '' : ' hidden') + '><strong id="memoReason">' + esc(memoReason(b, lines)) + '</strong><br>' +
         '<strong>ทำ Memo:</strong> ระบบบันทึกคำขอ ออกเลขที่ Memo และจองงบไว้ → กรอก Memo ตามแบบฟอร์ม แล้วพิมพ์ ไปให้ผู้บริหารเซ็น → กลับมาแนบไฟล์ที่เซ็นแล้วที่หน้าคำขอ จึงส่งให้ผู้คุมงบได้' +
         (existing && existing.memo && existing.memo.no ? '<br>Memo เดิมเลขที่ ' + esc(existing.memo.no) + ' — แก้ไขแล้วต้องให้ผู้บริหารเซ็นใหม่' : '') + '</p></div>' : '</div>') +
-      '<div class="card form-tip"><h3 class="side-title">คำแนะนำในการเบิก</h3><p class="tip-head">กรณีขอเกินงบประมาณ</p><p class="muted">ขอเกินงบรายการได้ โดยผู้คุมงบต้องใส่ Note · หากยอดเกินงบรวมโครงการ ผู้คุมงบจะพิจารณาโยกงบให้ หรือให้ขอเพิ่มงบ</p>' +
+      '<div class="card form-tip"><h3 class="side-title">คำแนะนำในการเบิก</h3><p class="tip-head">กรณีขอเกินงบประมาณ</p><p class="muted">' + (opex
+          ? 'OPEX ขอเกินวงเงินของแต่ละ Item (หรืองบรวมทั้งโครงการ) ไม่ได้ — ถ้าไม่พอ ต้องขอเพิ่มงบ หรือให้ผู้คุมงบโยกงบก่อน'
+          : 'CAPEX ขอเกินวงเงินรายการย่อยได้ โดยผู้คุมงบต้องใส่ Note แต่ห้ามเกินยอดคงเหลือของงบรวมโครงการ — ถ้าไม่พอ ต้องขอเพิ่มงบ / โยกงบก่อน') + '</p>' +
         '<p class="tip-head">หลาย Supplier ในรายการเดียว</p><p class="muted">กด "+ เพิ่ม Supplier" ใต้รายการ' + (opex ? ' เช่น ค่าแรงคนงานหลายคน' : '') + ' · Supplier ใหม่เลือก "+ เพิ่มชื่อใหม่…" ในช่อง Supplier</p>' +
         (isProject ? '<p class="tip-head">งบรวมทั้งโครงการ</p><p class="muted">ไม่มี Item ให้เลือก — แต่ละกลุ่มพิมพ์ชื่อรายการเอง' +
           (opex ? '' : ' และเลือกบริษัทที่ลงทุน (ใช้เงินข้ามบริษัทกับ PCC ต้องทำ Memo ให้ผู้บริหารเซ็นก่อนส่ง)') + '</p>' : '') + '</div>';
@@ -3604,7 +3604,7 @@
       (lastReject ? '<div class="alert error">เหตุผลที่ส่งกลับ: ' + esc(lastReject.comment) + '</div>' : '') +
       (dup ? '<div class="alert info">ทำซ้ำจากคำขอ <strong>' + esc(dup.no) + '</strong> — เพิ่ม ลด หรือแก้รายการและจำนวนเงินได้ · ได้เลขที่คำขอใหม่เมื่อส่ง · ไม่คัดลอกไฟล์แนบและ Memo · <a href="#/request/new/' + b.id + '">เริ่มใหม่โดยไม่คัดลอก</a></div>' : '') +
       '<div id="formError"></div>' +
-      '<form id="requestForm" class="req-form" data-budget="' + b.id + '" data-request="' + esc(requestId || '') + '" data-remaining="' + remaining + '">' +
+      '<form id="requestForm" class="req-form" data-budget="' + b.id + '" data-request="' + esc(requestId || '') + '" data-remaining="' + projRemain + '">' +
       '<div class="detail-layout"><div class="detail-main form-main">' + general + itemsCard +
       '<div id="planWrap">' + planFieldset(existing ? existing.paymentPlan : dup && dup.paymentPlan, 3) + '</div>' +
       '</div><aside class="detail-side">' + side + '</aside></div></form>';
@@ -3691,6 +3691,32 @@
     lines.forEach((l) => { if (l.itemId) byItem[l.itemId] = round2((byItem[l.itemId] || 0) + l.amount); });
     return Object.keys(byItem).map((id) => ({ item: itemById(b, id), remaining: remainingOf(id), amount: byItem[id] }))
       .filter((x) => x.amount > x.remaining);
+  }
+
+  /**
+   * ตรวจวงเงินของคำขอเบิก
+   *   OPEX: เกินวงเงินต่อ Item ไม่ได้ (งบรวมทั้งโครงการ = เกินยอดคงเหลือรวมไม่ได้) — ต้องขอเพิ่มงบ / โยกงบก่อน
+   *   CAPEX: เกินวงเงินต่อรายการได้ (ผู้คุมงบต้องใส่ Note) แต่ห้ามเกินยอดคงเหลือของงบรวม
+   * คืน { block: [ข้อความที่ส่งไม่ได้], note: [ข้อความเตือน] }
+   */
+  function requestLimitIssues(form) {
+    const b = budgetById(form.dataset.budget);
+    const project = b.structure === 'project';
+    const lines = readLines(form, project);
+    const total = round2(lines.reduce((x, l) => x + l.amount, 0));
+    const projRem = Number(form.dataset.remaining);
+    const out = { block: [], note: [] };
+    const overTotal = round2(total - projRem);
+    const itemOver = !project ? overItems(form, b, lines, false) : [];
+    if (b.type === 'CBS') {
+      itemOver.forEach((x) => out.block.push('เกินวงเงินรายการ ' + (x.item ? x.item.code + ' ' + x.item.name : '') + ' อยู่ ' + money(round2(x.amount - x.remaining)) + ' บาท'));
+      if (project && overTotal > 0) out.block.push('เกินวงเงินงบรวมทั้งโครงการ ' + money(overTotal) + ' บาท');
+      if (!project && overTotal > 0 && !itemOver.length) out.block.push('เกินงบคงเหลือของโครงการ ' + money(overTotal) + ' บาท');
+    } else {
+      if (overTotal > 0) out.block.push('เกินงบคงเหลือของโครงการ ' + money(overTotal) + ' บาท');
+      itemOver.forEach((x) => out.note.push('เกินงบรายการ ' + (x.item ? x.item.code : '') + ' อยู่ ' + money(round2(x.amount - x.remaining)) + ' บาท' + (overTotal > 0 ? '' : ' — ไม่เกินงบรวมของโครงการ ขอได้ แต่ผู้คุมงบต้องใส่ Note เมื่ออนุมัติ')));
+    }
+    return out;
   }
 
   function bindRequestForm() {
@@ -3798,17 +3824,16 @@
       const after = round2(Number(form.dataset.remaining) - (sb + sv));
       const afterEl = document.getElementById('sideAfter');
       afterEl.innerHTML = moneyCell(after);
-      const over = overItems(form, b, readLines(form, isCapex), isCapex);
-      const total = round2(sb + sv);
-      const overProject = round2(total - Number(form.dataset.remaining));
-      const notes = [];
-      if (over.length && b.structure !== 'project') {
-        over.forEach((x) => notes.push('เกินงบรายการ ' + esc(x.item ? x.item.code : '') + ' อยู่ <strong>' + money(x.amount - x.remaining) + '</strong> บาท' +
-          (overProject > 0 ? '' : ' — ยังไม่เกินงบรวมของโครงการ ขอได้ แต่ผู้คุมงบต้องใส่ Note เมื่ออนุมัติ')));
-      }
-      if (overProject > 0) notes.push('เกินงบคงเหลือของโครงการ <strong>' + money(overProject) + '</strong> บาท — ผู้คุมงบจะพิจารณาโยกงบมาให้ หรือส่งกลับให้ขอเพิ่มงบ');
-      document.getElementById('overBudget').hidden = !notes.length;
-      document.getElementById('overText').innerHTML = notes.join('<br>');
+      const lim = requestLimitIssues(form);
+      const box = document.getElementById('overBudget');
+      const txt = document.getElementById('overText');
+      box.hidden = !(lim.block.length || lim.note.length);
+      txt.className = lim.block.length ? 'alert error' : 'alert warn';
+      txt.innerHTML = lim.block.length
+        ? lim.block.map(esc).join('<br>') + '<br><strong>ขอเกินวงเงินไม่ได้</strong> — ต้องขอเพิ่มงบ / ให้ผู้คุมงบโยกงบก่อน แล้วจึงขอเบิกได้'
+        : lim.note.map(esc).join('<br>');
+      const reason = box.querySelector('.field');
+      if (reason) reason.hidden = !!lim.block.length || !lim.note.length;
     };
     const planRows = document.getElementById('planRows');
     const updatePlan = () => {
@@ -3908,6 +3933,7 @@
       if (!useType()) errors.push('กรุณาเลือกประเภทการเบิกใช้งบ');
       if (f.payee && f.payee.required && !f.payee.value.trim()) errors.push('กรุณาระบุผู้รับเงิน');
       if (!lines.length) errors.push('กรุณาใส่รายการที่ขอเบิกอย่างน้อย 1 บรรทัด');
+      requestLimitIssues(form).block.forEach((m) => errors.push(m + ' — ขอเกินวงเงินไม่ได้ ต้องขอเพิ่มงบ / ให้ผู้คุมงบโยกงบก่อน'));
       if (f.deliveryDate && !f.deliveryDate.value) errors.push('กรุณาระบุวันที่ส่งมอบ/วางบิล');
       if (f.payDueDate && !f.payDueDate.value) errors.push('กรุณาระบุวันที่กำหนดจ่ายเงิน');
       lines.forEach((l, i) => {
@@ -5027,7 +5053,7 @@
     const task = (label, n, href, note) => '<li><a href="' + href + '"><span>' + label + (note ? '<small>' + note + '</small>' : '') + '</span><b class="' + (n ? 'has' : '') + '">' + n + '</b></a></li>';
     const tasks = [];
     if (can('budget.verify')) {
-      tasks.push(task('งบที่รอยืนยันเปิดใช้ / ตรวจ Memo', db.budgets.filter((b) => b.state === 'review' || b.state === 'open_review').length, '#/tasks?tab=budgets'),
+      tasks.push(task('งบที่รออนุมัติ / ตรวจ Memo', db.budgets.filter((b) => b.state === 'review' || b.state === 'open_review').length, '#/tasks?tab=budgets'),
         task('คำขอเพิ่มงบรอตรวจสอบ', (db.changes || []).filter((c) => c.state === 'review').length, '#/tasks?tab=changes'));
     }
     if (can('request.decide')) tasks.push(task('คำขอเบิกใช้งบรอตรวจสอบ', inbox(u).length, '#/tasks?tab=requests'));
@@ -5776,12 +5802,12 @@
     const sec = (title, list, table) => ({ title, list, table });
 
     if (has('budget.verify')) {
-      add('budgets', 'งบรอยืนยันเปิดใช้', true, 'Memo ขอดำเนินการใช้งบ CAPEX ที่ผู้บริหารเซ็นแล้ว และคำขอตั้งงบใหม่ของ Business (มติ / เอกสารอนุมัติผู้บริหาร) — ตรวจแล้วยืนยันเปิดใช้ หรือส่งกลับให้ Business แก้ไข',
+      add('budgets', 'งบรออนุมัติ / ตรวจ Memo', true, 'Memo ขอดำเนินการใช้งบ CAPEX ที่ผู้บริหารเซ็นแล้ว และคำขอตั้งงบใหม่ของ Business (มติ / เอกสารอนุมัติผู้บริหาร) — ตรวจแล้วยืนยันเปิดใช้ หรือส่งกลับให้ Business แก้ไข',
         [sec('Memo ขอดำเนินการใช้งบ (งบประจำปี)', db.budgets.filter((b) => b.state === 'open_review'), budgetQueueTable),
           sec('คำขอตั้งงบใหม่ของ Business', db.budgets.filter((b) => b.state === 'review'), budgetQueueTable)]);
       if (has('budget.manage')) {
-        add('setup', 'งบที่ลงไว้ ยังไม่เปิดใช้งบ', false, 'งบ CAPEX ประจำปีที่ผู้คุมงบลงไว้ (สร้าง / Import Excel) ที่ Business ยังไม่ได้ขอดำเนินการใช้งบ — แก้ไข / ยกเลิกได้จนกว่า Business ส่ง Memo หรือเปิดใช้',
-          [sec('', db.budgets.filter((b) => b.setup && waitingOpen(b)), myBudgetTable)]);
+        add('setup', 'งบที่ผ่านอนุมัติ / ลงไว้ ยังไม่เปิดใช้งบ', false, 'งบ CAPEX ประจำปีที่ผู้คุมงบลงไว้ (สร้าง / Import Excel) ที่ Business ยังไม่ได้ขอดำเนินการใช้งบ — แก้ไข / ยกเลิกได้จนกว่า Business ส่ง Memo หรือเปิดใช้',
+          [sec('', db.budgets.filter((b) => openFlow(b) && waitingOpen(b)), myBudgetTable)]);
       }
       add('changes', 'คำขอเพิ่มงบ', true, 'ตรวจมติ / เอกสารอนุมัติผู้บริหารแล้วยืนยันเพิ่มงบ หรือส่งกลับ',
         [sec('', (db.changes || []).filter((c) => c.state === 'review'), changeQueueTable)]);
@@ -5938,8 +5964,9 @@
       ['ตั้งงบ', 'Journey งบประจำปี', 'CAPEX: ผู้คุมงบลงงบของแต่ละปี (กดสร้าง หรือ Import Excel) → งบรอ Business เจ้าของงบเปิดใช้ครั้งแรก (เปิดทั้งงบทีเดียว) → Business ทำ Memo ขอดำเนินการใช้งบ ให้ผู้บริหารเซ็น แนบไฟล์ที่เซ็นแล้วส่ง → ผู้คุมงบตรวจ Memo แล้วยืนยัน (หรือส่งกลับให้แก้) · ผู้คุมงบแก้ / ยกเลิกงบที่ลงไว้ได้จนกว่า Business ส่ง Memo หรือขอดำเนินการใช้งบ · OPEX: Business เป็นผู้สร้างงบเอง (ผู้คุมงบลง / Import OPEX ไม่ได้) — ดูแถว "OPEX Business สร้างและส่งอนุมัติเอง"'],
       ['ตั้งงบ', 'ช่องข้อมูลตามไฟล์ Capex / Opex Governance Framework', 'งบทุกประเภทมีช่อง: รหัส (Capex ID / Opex ID) · ชื่อโครงการ · หน่วยงานที่ขอ · กลุ่ม Priority · เหตุผลสนับสนุน Priority (ย่อ) · มูลค่ารวม · ปี (เฉลี่ยปีที่ลงทุน / ปีงบประมาณ) · Owner / เจ้าของ Action Plan · เจ้าของฝ่ายการเงิน (ติดตามร่วม) · สถานะอนุมัติ (คำนวณจากสถานะงบ) · กลุ่มรายการ · CAPEX เพิ่ม: กลุ่ม Priority การลงทุน (New) · ตัวเลือกกลุ่มต่าง ๆ ตั้งได้ที่ข้อมูลหลัก'],
       ['ตั้งงบ', 'Import งบจาก Excel', 'ไฟล์ .xlsx หรือ .csv ตามไฟล์ตัวอย่าง: 1 แถว = 1 Item · รหัสโครงการเดียวกัน = งบเดียวกัน · Business เจ้าของงบใส่ชื่อหรือรหัสผู้ใช้ · ตรวจข้อมูลก่อนนำเข้า (บริษัท / หน่วยงานตามข้อมูลหลัก, รหัสซ้ำ, วงเงิน > 0) งบที่ผิดไม่ถูกนำเข้า · นำเข้าได้เฉพาะ CAPEX'],
-      ['ตั้งงบ', 'OPEX Business สร้างและส่งอนุมัติเอง', 'Business สร้างงบ OPEX (ร่าง) เอง → พิมพ์แบบฟอร์มของระบบ หรือใช้เอกสารขออนุมัติของตนเอง ส่งผู้บริหารอนุมัติเองนอกระบบ → นำเอกสารอนุมัติกลับมาแนบ + เลขที่เอกสาร + ชื่อผู้บริหาร แล้วกด "ขอดำเนินการใช้งบ" → งบเปิดใช้ทันที ไม่ผ่านผู้คุมงบยืนยัน (ผู้คุมงบยังเห็นงบและประวัติ ใส่ GL / ปรับงบได้ตามปกติ) · ผู้คุมงบไม่ต้องลง OPEX ให้'],
-      ['ตั้งงบ', 'Business ยังขอตั้งงบใหม่เองได้ไหม', 'ได้ (ทางเดิม) สำหรับ CAPEX: ร่าง → พิมพ์แบบฟอร์มเข้าที่ประชุม → แนบมติ → ผู้คุมงบยืนยันเปิดใช้ — ทางนี้ไม่ต้องทำ Memo ขอดำเนินการใช้งบอีก เพราะผู้คุมงบตรวจมติแล้ว · OPEX ไม่ผ่านผู้คุมงบ (ดูแถวด้านบน)'],
+      ['ตั้งงบ', 'ขั้นตอนหลักของงบ (CAPEX / OPEX)', 'Business สร้าง: สร้างงบประมาณ (ร่าง) → อนุมัติ (ส่งแล้ว สถานะ "รออนุมัติ" — ผู้อนุมัติเซ็นเอกสารนอกระบบ ผู้คุมงบเป็นคนกดตรวจผ่าน / ส่งกลับในระบบ) → เปิดใช้ (CAPEX: ส่ง Memo ให้ผู้คุมงบยืนยัน · OPEX: Business กดขอดำเนินการใช้งบ) → จบเมื่อเปิดใช้งบ · ผู้คุมงบสร้าง / Import: สร้างงบประมาณ → เปิดใช้ (2 ขั้น)'],
+      ['ใช้งบ', 'วงเงินที่ขอเบิกได้', 'OPEX: เกินวงเงินต่อ Item (งบรวมทั้งโครงการ = เกินวงเงินรวม) ไม่ได้ ต้องขอเพิ่มงบ / โยกงบก่อน · CAPEX: เกินวงเงินรายการย่อยได้ (ผู้คุมงบใส่ Note) แต่ห้ามเกินงบรวมของโครงการ'],
+      ['ใช้งบ', 'Memo ตอนเบิกใช้งบ (ยังไม่สรุป)', 'ตอนนี้: Memo ขอดำเนินการใช้งบทำครั้งเดียวตอนเปิดใช้ (CAPEX) · ตอนเบิกใช้ทำ Memo เฉพาะ CAPEX ข้ามบริษัทกับ PCC · ยังไม่ได้ตัดสินว่าต้องทำ Memo ทุกครั้งที่เบิก หรือให้ผู้คุมงบอนุญาตอย่างเดียว'],
       ['ตั้งงบ', 'ใครกำหนดรหัสโครงการ/รหัสรายการย่อย', 'ผู้คุมงบกรอกตอนลงงบ / Import · Business กรอกเองเมื่อขอตั้งงบใหม่'],
       ['ตั้งงบ', 'แบบฟอร์มขออนุมัติงบเข้าที่ประชุม', 'ใช้แบบฟอร์มชั่วคราว (รอแบบฟอร์มจริง)'],
       ['ตั้งงบ', 'หลักฐานที่ต้องแนบ', 'ไฟล์มติที่ประชุมอย่างน้อย 1 ไฟล์ + เลขที่มติ'],
@@ -6084,6 +6111,7 @@
 
         if (e.purpose && !filled(e.purpose)) m.push('วัตถุประสงค์');
         if (e.payee && e.payee.required && !filled(e.payee)) m.push('ผู้รับเงิน');
+        if (requestLimitIssues(f).block.length) m.push('ยอดไม่เกินวงเงิน');
         if (e.deliveryDate && !filled(e.deliveryDate)) m.push('วันที่ส่งมอบ/วางบิล');
         if (e.payDueDate && !filled(e.payDueDate)) m.push('วันที่กำหนดจ่ายเงิน');
         const rows = lineTrs(f).map((tr) => ({
