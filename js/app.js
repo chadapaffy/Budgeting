@@ -62,7 +62,7 @@
     { key: 'master.manage', group: 'ผู้ดูแลระบบ', label: 'จัดการข้อมูลหลัก', hint: 'บริษัท หน่วยงาน กลุ่มงบ ประเภทสินทรัพย์ หมวดค่าใช้จ่าย GL Code' },
     { key: 'data.export', group: 'การเงิน / บัญชี', label: 'ส่งออกข้อมูล (Excel)', hint: 'ดาวน์โหลดข้อมูลงบ คำขอ การตัดงบ ปรับงบ Plan Cashflow เป็นไฟล์ .xlsx' },
     { key: 'log.view', group: 'ผู้ดูแลระบบ', label: 'ดู Log การทำงาน', hint: '' },
-    { key: 'user.manage', group: 'ผู้ดูแลระบบ', label: 'จัดการผู้ใช้ บทบาท และสิทธิ์', hint: 'หน้า Admin (โหมดทดลองดูได้อย่างเดียว)' }
+    { key: 'user.manage', group: 'ผู้ดูแลระบบ', label: 'จัดการผู้ใช้ บทบาท และสิทธิ์', hint: 'หน้า Admin: เพิ่ม/แก้ผู้ใช้ รีเซ็ตรหัสผ่าน แก้สิทธิ์ของบทบาท' }
   ];
   /** โหมดทดลอง: สิทธิ์ตั้งต้นของแต่ละบทบาท */
   const DEMO_ROLE_PERMS = {
@@ -71,6 +71,29 @@
     purchasing: ['budget.view_all', 'po.record'],
     admin: ['budget.view_all', 'master.manage', 'log.view', 'user.manage', 'data.export']
   };
+  /** โหมดทดลอง: Admin แก้สิทธิ์ของบทบาท / สร้างบทบาทเพิ่มได้ — เก็บในเบราว์เซอร์ (คีย์ procurement.v5.roles) แล้วทับค่าตั้งต้นด้านบน */
+  const ROLES_KEY = DB_KEY + '.roles';
+  const BUILTIN_ROLES = Object.keys(DEMO_ROLE_PERMS);
+  const DEFAULT_ROLE_PERMS = JSON.parse(JSON.stringify(DEMO_ROLE_PERMS));
+  const DEFAULT_ROLE_LABEL = Object.assign({}, ROLE_LABEL);
+  function loadRoles() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(ROLES_KEY) || 'null'); } catch (e) { saved = null; }
+    if (!saved || typeof saved !== 'object') return;
+    Object.keys(saved).forEach((k) => {
+      const r = saved[k];
+      if (!r || !Array.isArray(r.perms)) return;
+      DEMO_ROLE_PERMS[k] = r.perms.filter((x) => PERMISSIONS.some((p) => p.key === x));
+      if (!BUILTIN_ROLES.includes(k) && r.name) ROLE_LABEL[k] = String(r.name);
+    });
+    if (!DEMO_ROLE_PERMS.admin.includes('user.manage')) DEMO_ROLE_PERMS.admin.push('user.manage');
+  }
+  function saveRoles() {
+    const out = {};
+    Object.keys(DEMO_ROLE_PERMS).forEach((k) => { out[k] = { perms: DEMO_ROLE_PERMS[k], name: ROLE_LABEL[k] }; });
+    try { localStorage.setItem(ROLES_KEY, JSON.stringify(out)); return true; } catch (e) { alert('บันทึกบทบาทไม่สำเร็จ (พื้นที่เบราว์เซอร์เต็ม)'); return false; }
+  }
+  if (!REMOTE) loadRoles();
 
   const COMPANIES = { PBI: 'บริษัท PBI (ตัวอย่าง)', PCC: 'บริษัท PCC (ตัวอย่าง)' };
   /**
@@ -751,6 +774,55 @@
   // เปิดให้หน้า Admin / ชุดทดสอบเรียกใช้ (ทุกฟังก์ชันตรวจสิทธิ์ user.manage เอง)
   window.AppAccounts = { list: () => USERS.slice(), create: accountCreate, update: accountUpdate, setActive: accountSetActive, resetPassword: accountResetPassword, state: accountState };
 
+  // ---- บทบาทและสิทธิ์ (โหมดทดลอง ต้องมีสิทธิ์ user.manage) ----------------------------------------
+  /** บันทึกสิทธิ์ของบทบาท: map = { roleKey: [permKey, ...] } (บทบาท admin ต้องมี user.manage เสมอ) */
+  function rolesSavePerms(map) {
+    requireUserManage();
+    Object.keys(map).forEach((k) => {
+      if (!DEMO_ROLE_PERMS[k]) return;
+      const perms = PERMISSIONS.map((p) => p.key).filter((x) => map[k].includes(x));
+      if (k === 'admin' && !perms.includes('user.manage')) perms.push('user.manage');
+      DEMO_ROLE_PERMS[k] = perms;
+    });
+    saveRoles();
+    logAction('แก้สิทธิ์ของบทบาท', '', Object.keys(map).map((k) => ROLE_LABEL[k] || k).join(', '));
+    save();
+  }
+  function rolesCreate(name) {
+    requireUserManage();
+    const n = String(name || '').trim();
+    if (!n) throw new Error('กรุณาระบุชื่อบทบาท');
+    if (Object.keys(ROLE_LABEL).some((k) => DEMO_ROLE_PERMS[k] && ROLE_LABEL[k] === n)) throw new Error('มีบทบาทชื่อนี้แล้ว');
+    let i = 1; while (DEMO_ROLE_PERMS['role' + i]) i += 1;
+    const key = 'role' + i;
+    DEMO_ROLE_PERMS[key] = [];
+    ROLE_LABEL[key] = n;
+    saveRoles();
+    logAction('สร้างบทบาท', key, n);
+    save();
+    return key;
+  }
+  function rolesRemove(key) {
+    requireUserManage();
+    if (BUILTIN_ROLES.includes(key) || !DEMO_ROLE_PERMS[key]) throw new Error('ลบได้เฉพาะบทบาทที่สร้างเพิ่ม');
+    if (USERS.some((u) => u.role === key)) throw new Error('ยังมีผู้ใช้ใช้บทบาทนี้อยู่ ย้ายผู้ใช้ไปบทบาทอื่นก่อน');
+    const n = ROLE_LABEL[key];
+    delete DEMO_ROLE_PERMS[key];
+    delete ROLE_LABEL[key];
+    saveRoles();
+    logAction('ลบบทบาท', key, n);
+    save();
+  }
+  /** คืนสิทธิ์ของบทบาทตั้งต้นเป็นค่าเริ่มต้น (บทบาทที่สร้างเพิ่มไม่ถูกแตะ) */
+  function rolesReset() {
+    requireUserManage();
+    BUILTIN_ROLES.forEach((k) => { DEMO_ROLE_PERMS[k] = DEFAULT_ROLE_PERMS[k].slice(); ROLE_LABEL[k] = DEFAULT_ROLE_LABEL[k]; });
+    saveRoles();
+    logAction('คืนค่าเริ่มต้นสิทธิ์ของบทบาท', '', '');
+    save();
+  }
+  window.AppRoles = { list: () => Object.keys(DEMO_ROLE_PERMS).map((k) => ({ key: k, name: ROLE_LABEL[k] || k, builtin: BUILTIN_ROLES.includes(k), perms: DEMO_ROLE_PERMS[k].slice() })), savePerms: rolesSavePerms, create: rolesCreate, remove: rolesRemove, reset: rolesReset };
+
   function save() {
     if (REMOTE) { console.error('save() ถูกเรียกในโหมด Supabase — ข้อมูลต้องบันทึกผ่านเซิร์ฟเวอร์'); return; }
     try {
@@ -1206,16 +1278,14 @@
     if (tabs.length) links.push(['tasks', '#/tasks', 'งานทั้งหมด' + count(tabs.reduce((n, t) => n + (t.act ? t.n : 0), 0)), ['#/tasks', '#/approvals', '#/po', '#/cuts', '#/accounting', '#/payments']]);
     if (canViewAll() || can('request.create')) links.push(['requests', '#/requests', 'รายการเบิกใช้งบ', ['#/requests', '#/request/', '#/doc/']]);
     if (isWorker(u)) links.push(['history', '#/history', 'ประวัติการทำรายการ', ['#/history']]);
-    if (can('master.manage')) {
-      links.push(['master', '#/master', 'ข้อมูลหลัก', ['#/master']]);
+    if (adminTabsFor().length) {
+      links.push(['admin', adminTabsFor()[0][1], 'Admin' + count(REMOTE ? adminCounts.pending : adminResetCount()), ['#/admin', '#/master', '#/log']]);
       if (route.startsWith('#/master')) {
         const cur = route.split('/')[2] || MASTER_NAV[0][0];
         MASTER_NAV.forEach(([k, t]) => links.push(['sub', '#/master/' + k, t, [], k === cur]));
       }
     }
     if (can('data.export')) links.push(['export', '#/export', 'ส่งออกข้อมูล (Excel)', ['#/export']]);
-    if (can('log.view')) links.push(['log', '#/log', 'Log การทำงาน', ['#/log']]);
-    if (can('user.manage')) links.push(['admin', '#/admin', 'ผู้ใช้และสิทธิ์' + count(REMOTE ? adminCounts.pending : 0), ['#/admin']]);
     links.push(['report', '#/dashboard', 'รายงาน', ['#/dashboard']]);
     let activeDone = false;
     document.getElementById('nav').innerHTML = links.map(([icon, href, text, prefixes, subActive]) => {
@@ -5308,7 +5378,7 @@
       '<template>' + masterRow(sec, {}, true) + '</template>' +
       '<div class="actions"><button type="button" class="btn" data-m-add>+ เพิ่ม</button><button class="btn primary" type="submit">บันทึก' + sec.title + '</button></div></form></section>').join('');
 
-    return '<div class="page-head"><div><h1>' + esc(navTitle) + '</h1><div class="page-sub">ข้อมูลหลัก — ค่าที่ใช้เป็นตัวเลือกในฟอร์มและรายงาน</div></div></div>' + takeFlash() +
+    return '<div class="page-head"><div><h1>' + esc(navTitle) + '</h1><div class="page-sub">ข้อมูลหลัก — ค่าที่ใช้เป็นตัวเลือกในฟอร์มและรายงาน</div></div></div>' + takeFlash() + adminTabsHtml('master') +
       '<div id="formError"></div><div class="form-main">' + sections +
       '</div>';
   }
@@ -5385,9 +5455,24 @@
 
   // ---------------------------------------------------------------- Admin: ผู้ใช้ บทบาท สิทธิ์ (โหมด Supabase)
 
+  /** แท็บของหน้า Admin (แสดงตามสิทธิ์) — [key, href, ข้อความ] */
+  function adminTabsFor() {
+    const t = [];
+    if (can('user.manage')) t.push(['users', '#/admin', 'ผู้ใช้'], ['roles', '#/admin?tab=roles', 'บทบาทและสิทธิ์']);
+    if (can('master.manage')) t.push(['master', '#/master', 'ข้อมูลหลัก']);
+    if (can('log.view')) t.push(['log', '#/log', 'Log การทำงาน']);
+    return t;
+  }
+  const adminResetCount = () => (!REMOTE && can('user.manage') ? USERS.filter((u) => accountState(u).key === 'reset_requested').length : 0);
+  function adminTabsHtml(active) {
+    return '<nav class="tabs" aria-label="หมวด Admin">' + adminTabsFor().map(([k, href, label]) =>
+      '<a href="' + href + '"' + (k === active ? ' class="active" aria-current="page"' : '') + '>' + label +
+      (k === 'users' && adminResetCount() ? ' <span class="tab-count">(' + adminResetCount() + ' ขอรีเซ็ต)</span>' : '') + '</a>').join('') + '</nav>';
+  }
+
   function viewAdmin(params) {
     if (!can('user.manage')) return '<div class="alert error">ไม่มีสิทธิ์จัดการผู้ใช้และสิทธิ์</div>';
-    if (!REMOTE) return viewAdminDemo();
+    if (!REMOTE) return viewAdminDemo(params);
     const tab = params.get('tab') === 'roles' ? 'roles' : 'users';
     const t = (key, label) => '<a href="#/admin' + (key === 'roles' ? '?tab=roles' : '') + '"' + (tab === key ? ' class="active" aria-current="page"' : '') + '>' + label + '</a>';
     return '<div class="page-head"><div><h1>ผู้ใช้และสิทธิ์</h1><div class="page-sub">จัดการผู้ใช้ บทบาท และสิทธิ์ของแต่ละบทบาท — มีผลทันที ตรวจสอบที่ฝั่งฐานข้อมูล</div></div></div>' + takeFlash() +
@@ -5398,6 +5483,7 @@
   async function bindAdmin() {
     const box = document.getElementById('adminBox');
     if (!box) return;
+    if (!REMOTE) { bindAdminDemo(box); return; }
     const [ru, rr] = await Promise.all([run(() => window.RemoteApi.listUsers()), run(() => window.RemoteApi.listRoles())]);
     if (!ru || !rr || !document.getElementById('adminBox')) return;
     const users = ru.value;
@@ -6032,23 +6118,168 @@
     });
   }
 
-  // ---------------------------------------------------------------- ผู้ใช้และสิทธิ์ (โหมดทดลอง: ดูอย่างเดียว)
+  // ---------------------------------------------------------------- Admin: ผู้ใช้ / บทบาทและสิทธิ์ (โหมดทดลอง แก้ไขได้ เก็บในเบราว์เซอร์)
 
-  function viewAdminDemo() {
-    const roles = Object.keys(DEMO_ROLE_PERMS);
-    const users = '<div class="table-wrap"><table><thead><tr><th>ชื่อ</th><th>อีเมล</th><th>ตำแหน่ง</th><th>หน่วยงาน</th><th>บริษัท</th><th>บทบาท</th><th>สถานะ</th></tr></thead><tbody>' +
-      USERS.map((x) => '<tr><td>' + esc(x.name) + '</td><td>' + esc(x.email) + '</td><td>' + esc(x.title) + '</td><td>' + esc(x.department) + '</td><td>' + esc(x.company) + '</td><td>' + esc(roleLabel(x)) + '</td><td>' + esc(accountState(x).label) + '</td></tr>').join('') + '</tbody></table></div>';
+  const ACCOUNT_BADGE = { pending: 'draft', ok: 'approved', reset_requested: 'pending', inactive: 'cancelled' };
+  const ACCOUNT_STATES = [['pending', 'รอตั้งรหัสผ่าน'], ['ok', 'ใช้งานได้'], ['reset_requested', 'ขอรีเซ็ตรหัสผ่าน'], ['inactive', 'ปิดการใช้งาน']];
+  const roleKeys = () => Object.keys(DEMO_ROLE_PERMS);
+
+  function viewAdminDemo(params) {
+    const tab = params && params.get('tab') === 'roles' ? 'roles' : 'users';
+    return '<div class="page-head"><div><h1>Admin</h1><div class="page-sub">จัดการผู้ใช้ บทบาท และสิทธิ์ · ข้อมูลหลัก · Log การทำงาน — โหมดทดลองเก็บในเบราว์เซอร์นี้เท่านั้น</div></div></div>' +
+      takeFlash() + adminTabsHtml(tab) + '<div id="formError"></div><div id="adminBox">' + (tab === 'roles' ? viewAdminRoles() : viewAdminUsers()) + '</div>';
+  }
+
+  function viewAdminUsers() {
+    const reset = adminResetCount();
+    const roleSel = (id) => '<div class="select-wrap"><select ' + id + '>' + roleKeys().map((k) => opt(k, ROLE_LABEL[k] || k, '')).join('') + '</select></div>';
+    const fld = (label, inner) => '<label class="field"><span>' + label + '</span>' + inner + '</label>';
+    const form = '<section class="card form-section" id="userFormCard" hidden><div class="section-head"><h2 class="section-title" id="userFormTitle">เพิ่มผู้ใช้</h2></div>' +
+      '<form id="userForm" novalidate><div class="form-grid">' +
+      fld('อีเมล', '<input name="email" type="email" required autocomplete="off" placeholder="name@company.com">') +
+      fld('ชื่อ-นามสกุล', '<input name="name" required>') +
+      fld('ตำแหน่ง', '<input name="title">') +
+      fld('บทบาท', '<div class="select-wrap"><select name="role" required>' + roleKeys().map((k) => opt(k, ROLE_LABEL[k] || k, 'business')).join('') + '</select></div>') +
+      fld('หน่วยงาน', '<div class="select-wrap"><select name="department"><option value="">— เลือกหน่วยงาน —</option>' + db.master.departments.map((d) => opt(d.name, d.name, '')).join('') + '</select></div>') +
+      fld('บริษัท', '<div class="select-wrap"><select name="company"><option value="">— เลือกบริษัท —</option>' + db.master.companies.map((c) => opt(c.code, c.code + (c.name ? ' — ' + c.name : ''), '')).join('') + '</select></div>') +
+      '</div><div class="muted section-hint" id="userFormHint">ผู้ดูแลระบบไม่ตั้งรหัสผ่านให้ — ผู้ใช้เข้าหน้าล็อกอิน → "ตั้งรหัสผ่าน" แล้วกรอกอีเมลนี้เพื่อตั้งรหัสผ่านเอง</div>' +
+      '<div class="actions"><button class="btn primary" type="submit">บันทึก</button><button class="btn" type="button" data-user-cancel>ยกเลิก</button></div></form></section>';
+    const rows = USERS.map((u) => {
+      const st = accountState(u);
+      const self = u.id === me().id;
+      return '<tr data-uid="' + esc(u.id) + '" data-search="' + esc([u.email, u.name, u.title, u.department, u.company].join(' ').toLowerCase()) + '" data-role="' + esc(u.role) + '" data-state="' + st.key + '">' +
+        '<td>' + esc(u.name) + (self ? ' <span class="muted">(คุณ)</span>' : '') + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.title || '–') + '</td><td>' + esc(u.department || '–') + '</td><td>' + esc(u.company || '–') + '</td>' +
+        '<td>' + esc(roleLabel(u)) + '</td><td><span class="badge ' + ACCOUNT_BADGE[st.key] + '">' + esc(st.label) + '</span></td>' +
+        '<td class="nowrap">' + (u.lastLoginAt ? fmtDate(u.lastLoginAt) : '–') + '</td>' +
+        '<td class="nowrap"><button type="button" class="btn small" data-user-edit>แก้ไข</button> ' +
+        '<button type="button" class="btn small" data-user-reset' + (u.active === false ? ' disabled' : '') + '>รีเซ็ตรหัสผ่าน</button> ' +
+        '<button type="button" class="btn small' + (u.active === false ? '' : ' bad') + '" data-user-toggle' + (self ? ' disabled title="ปิดบัญชีของตัวเองไม่ได้"' : '') + '>' + (u.active === false ? 'เปิดใช้งาน' : 'ปิดใช้งาน') + '</button></td></tr>';
+    }).join('');
+    return (reset ? '<div class="alert warn" id="resetAlert">มี ' + reset + ' บัญชีขอรีเซ็ตรหัสผ่าน — กด "รีเซ็ตรหัสผ่าน" ที่แถวนั้นเพื่อให้ผู้ใช้ตั้งรหัสใหม่เอง <button type="button" class="btn small" data-filter-reset>ดูเฉพาะที่ขอรีเซ็ต</button></div>' : '') +
+      '<div class="page-head"><div class="rr-panel-title">ผู้ใช้ <span class="rr-count" id="userCount">' + USERS.length + '</span></div><div class="head-actions"><button type="button" class="btn primary" data-user-add>+ เพิ่มผู้ใช้</button></div></div>' + form +
+      '<div class="admin-filters"><label class="input-wrap search">' + ICON_SEARCH + '<input id="userQ" type="search" placeholder="ค้นหาชื่อ อีเมล ตำแหน่ง หน่วยงาน" aria-label="ค้นหาผู้ใช้"></label>' +
+      '<div class="select-wrap"><select id="userRoleF" aria-label="กรองบทบาท">' + opt('', 'บทบาท: ทั้งหมด', '') + roleKeys().map((k) => opt(k, ROLE_LABEL[k] || k, '')).join('') + '</select></div>' +
+      '<div class="select-wrap"><select id="userStateF" aria-label="กรองสถานะ">' + opt('', 'สถานะ: ทั้งหมด', '') + ACCOUNT_STATES.map(([k, t]) => opt(k, t, '')).join('') + '</select></div></div>' +
+      '<div class="table-wrap"><table id="userTable"><thead><tr><th>ชื่อ</th><th>อีเมล</th><th>ตำแหน่ง</th><th>หน่วยงาน</th><th>บริษัท</th><th>บทบาท</th><th>สถานะ</th><th>เข้าใช้ล่าสุด</th><th></th></tr></thead><tbody>' + rows +
+      '<tr id="userEmpty" hidden><td colspan="9" class="empty">ไม่พบผู้ใช้</td></tr></tbody></table></div>';
+  }
+
+  function viewAdminRoles() {
+    const keys = roleKeys();
     let group = '';
-    const matrix = '<div class="table-wrap"><table class="perm-matrix"><thead><tr><th>สิทธิ์</th>' + roles.map((r) => '<th class="center">' + esc(ROLE_LABEL[r]) + '</th>').join('') + '</tr></thead><tbody>' +
-      PERMISSIONS.map((pm) => {
-        const head = pm.group !== group ? '<tr class="perm-group"><td colspan="' + (roles.length + 1) + '">' + esc(pm.group) + '</td></tr>' : '';
-        group = pm.group;
-        return head + '<tr><td>' + esc(pm.label) + (pm.hint ? '<div class="muted">' + esc(pm.hint) + '</div>' : '') + '</td>' +
-          roles.map((r) => '<td class="center">' + (DEMO_ROLE_PERMS[r].includes(pm.key) ? '<span class="pos" aria-label="มีสิทธิ์">✓</span>' : '<span class="muted" aria-label="ไม่มีสิทธิ์">–</span>') + '</td>').join('') + '</tr>';
-      }).join('') + '</tbody></table></div>';
-    return '<div class="page-head"><div><h1>ผู้ใช้และสิทธิ์</h1><div class="page-sub">โหมดทดลองดูได้อย่างเดียว — ระบบจริง Admin เพิ่มผู้ใช้ กำหนดบทบาท และแก้สิทธิ์ของแต่ละบทบาทได้</div></div></div>' +
-      '<section class="card form-section"><div class="section-head"><h2 class="section-title">ผู้ใช้</h2></div>' + users + '</section>' +
-      '<section class="card form-section"><div class="section-head"><h2 class="section-title">บทบาทและสิทธิ์</h2></div>' + matrix + '</section>';
+    const head = keys.map((k) => '<th class="center perm-col"><span class="role-name">' + esc(ROLE_LABEL[k] || k) + '</span>' +
+      (BUILTIN_ROLES.includes(k) ? '' : '<div><button type="button" class="btn small bad" data-role-del="' + esc(k) + '">ลบบทบาท</button></div>') + '</th>').join('');
+    const body = PERMISSIONS.map((pm) => {
+      const g = pm.group !== group ? '<tr class="perm-group"><td colspan="' + (keys.length + 1) + '">' + esc(pm.group) + '</td></tr>' : '';
+      group = pm.group;
+      return g + '<tr><td>' + esc(pm.label) + (pm.hint ? '<div class="muted">' + esc(pm.hint) + '</div>' : '') + '</td>' + keys.map((k) => {
+        const locked = k === 'admin' && pm.key === 'user.manage';
+        return '<td class="center"><input type="checkbox" data-role="' + esc(k) + '" data-perm="' + pm.key + '"' + (DEMO_ROLE_PERMS[k].includes(pm.key) ? ' checked' : '') + (locked ? ' disabled title="Admin ต้องมีสิทธิ์นี้เสมอ"' : '') + ' aria-label="' + esc(ROLE_LABEL[k] + ' — ' + pm.label) + '"></td>';
+      }).join('') + '</tr>';
+    }).join('');
+    return '<section class="card form-section"><div class="section-head"><div><h2 class="section-title">สิทธิ์ของแต่ละบทบาท</h2><div class="muted section-hint">ติ๊กแล้วกด "บันทึกสิทธิ์" — มีผลกับผู้ใช้ทุกคนที่อยู่ในบทบาทนั้นทันที (ผู้ใช้ที่ล็อกอินอยู่ต้องรีเฟรชหน้า)</div></div></div>' +
+      '<form id="rolePermForm"><div class="table-wrap"><table class="perm-matrix"><thead><tr><th>สิทธิ์</th>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
+      '<div class="actions"><button class="btn primary" type="submit">บันทึกสิทธิ์</button><button class="btn" type="button" data-roles-reset>คืนค่าเริ่มต้น</button></div></form></section>' +
+      '<section class="card form-section"><div class="section-head"><h2 class="section-title">เพิ่มบทบาท</h2></div>' +
+      '<form id="roleAddForm" novalidate><div class="form-grid"><label class="field"><span>ชื่อบทบาท</span><input name="name" required placeholder="เช่น ผู้ตรวจสอบภายใน"></label></div>' +
+      '<div class="actions"><button class="btn" type="submit">+ เพิ่มบทบาท</button></div></form></section>';
+  }
+
+  function bindAdminDemo(box) {
+    const app = document.getElementById('app');
+    const err = (m) => { document.getElementById('formError').innerHTML = '<div class="alert error">' + esc(m) + '</div>'; window.scrollTo(0, 0); };
+    const back = () => go(location.hash);
+    // ----- แท็บบทบาทและสิทธิ์
+    const rp = document.getElementById('rolePermForm');
+    if (rp) {
+      rp.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const map = {};
+        roleKeys().forEach((k) => { map[k] = Array.from(rp.querySelectorAll('[data-role="' + k + '"]:checked')).map((c) => c.dataset.perm); });
+        try { rolesSavePerms(map); setFlash('success', 'บันทึกสิทธิ์ของบทบาทแล้ว'); } catch (ex) { err(ex.message); return; }
+        back();
+      });
+      rp.querySelector('[data-roles-reset]').addEventListener('click', () => {
+        if (!confirm('คืนสิทธิ์ของบทบาทตั้งต้นเป็นค่าเริ่มต้น? (บทบาทที่สร้างเพิ่มไม่ถูกแตะ)')) return;
+        try { rolesReset(); setFlash('success', 'คืนค่าเริ่มต้นแล้ว'); } catch (ex) { err(ex.message); return; }
+        back();
+      });
+      rp.querySelectorAll('[data-role-del]').forEach((b) => b.addEventListener('click', () => {
+        if (!confirm('ลบบทบาท "' + ROLE_LABEL[b.dataset.roleDel] + '" ?')) return;
+        try { rolesRemove(b.dataset.roleDel); setFlash('success', 'ลบบทบาทแล้ว'); } catch (ex) { err(ex.message); return; }
+        back();
+      }));
+      document.getElementById('roleAddForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        try { rolesCreate(e.target.elements.name.value); setFlash('success', 'เพิ่มบทบาทแล้ว — ติ๊กสิทธิ์ให้บทบาทนี้ในตารางด้านบน'); } catch (ex) { err(ex.message); return; }
+        back();
+      });
+      return;
+    }
+    // ----- แท็บผู้ใช้
+    const table = document.getElementById('userTable');
+    if (!table) return;
+    const q = document.getElementById('userQ'), fr = document.getElementById('userRoleF'), fs = document.getElementById('userStateF');
+    const filter = () => {
+      let n = 0;
+      table.querySelectorAll('tbody tr[data-uid]').forEach((tr) => {
+        const ok = (!q.value.trim() || tr.dataset.search.includes(q.value.trim().toLowerCase())) && (!fr.value || tr.dataset.role === fr.value) && (!fs.value || tr.dataset.state === fs.value);
+        tr.hidden = !ok;
+        if (ok) n += 1;
+      });
+      document.getElementById('userEmpty').hidden = n > 0;
+      document.getElementById('userCount').textContent = n;
+    };
+    [q, fr, fs].forEach((el) => el.addEventListener('input', filter));
+    const fa = app.querySelector('[data-filter-reset]');
+    if (fa) fa.addEventListener('click', () => { fs.value = 'reset_requested'; filter(); });
+    const card = document.getElementById('userFormCard'), form = document.getElementById('userForm');
+    let editId = '';
+    const openForm = (u) => {
+      editId = u ? u.id : '';
+      form.reset();
+      document.getElementById('formError').innerHTML = '';
+      document.getElementById('userFormTitle').textContent = u ? 'แก้ไขผู้ใช้' : 'เพิ่มผู้ใช้';
+      document.getElementById('userFormHint').hidden = !!u;
+      ['email', 'name', 'title', 'role', 'department', 'company'].forEach((k) => {
+        const el = form.elements[k];
+        const v = u ? u[k] || '' : (k === 'role' ? 'business' : '');
+        if (el.tagName === 'SELECT' && v && !Array.from(el.options).some((o) => o.value === v)) el.appendChild(new Option(v, v)); // ค่าเดิมที่ไม่อยู่ในข้อมูลหลักแล้ว ไม่ให้หาย
+        el.value = v;
+      });
+      card.hidden = false;
+      card.scrollIntoView({ block: 'nearest' });
+      form.elements.email.focus();
+    };
+    app.querySelector('[data-user-add]').addEventListener('click', () => openForm(null));
+    app.querySelector('[data-user-cancel]').addEventListener('click', () => { card.hidden = true; document.getElementById('formError').innerHTML = ''; });
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const f = form.elements;
+      const data = { email: f.email.value, name: f.name.value, title: f.title.value, department: f.department.value, company: f.company.value, role: f.role.value };
+      try {
+        if (editId) { accountUpdate(editId, data); setFlash('success', 'แก้ไขข้อมูลผู้ใช้แล้ว'); } else { accountCreate(data); setFlash('success', 'เพิ่มผู้ใช้แล้ว — แจ้งผู้ใช้ให้เข้าหน้าล็อกอิน → "ตั้งรหัสผ่าน" ด้วยอีเมล ' + normEmail(data.email)); }
+      } catch (ex) { err(ex.message); return; }
+      back();
+    });
+    table.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      const tr = e.target.closest('tr[data-uid]');
+      if (!btn || !tr || btn.disabled) return;
+      const u = user(tr.dataset.uid);
+      if (!u) return;
+      if (btn.matches('[data-user-edit]')) openForm(u);
+      else if (btn.matches('[data-user-reset]')) {
+        if (!confirm('รีเซ็ตรหัสผ่านของ ' + u.name + ' (' + u.email + ') ?\nรหัสเดิมจะใช้ไม่ได้ทันที — ผู้ใช้ต้องเข้า "ตั้งรหัสผ่าน" เพื่อตั้งรหัสใหม่เอง')) return;
+        try { accountResetPassword(u.id); setFlash('success', 'รีเซ็ตรหัสผ่านของ ' + u.name + ' แล้ว — ให้ผู้ใช้ตั้งรหัสใหม่เองที่หน้าล็อกอิน'); } catch (ex) { err(ex.message); return; }
+        back();
+      } else if (btn.matches('[data-user-toggle]')) {
+        const on = u.active === false;
+        if (!on && !confirm('ปิดการใช้งานบัญชีของ ' + u.name + ' ? ผู้ใช้จะล็อกอินไม่ได้และหลุดจากระบบทันที')) return;
+        try { accountSetActive(u.id, on); setFlash('success', (on ? 'เปิดใช้งาน' : 'ปิดการใช้งาน') + 'บัญชีของ ' + u.name + ' แล้ว'); } catch (ex) { err(ex.message); return; }
+        back();
+      }
+    });
   }
 
   function viewLog(params) {
@@ -6057,7 +6288,7 @@
     const who = params.get('by') || '';
     const list = (db.log || []).slice().reverse().filter((x) => (!who || x.by === who) &&
       (!q || (x.action + ' ' + x.ref + ' ' + x.detail).toLowerCase().includes(q)));
-    return '<div class="page-head"><div><h1>Log การทำงาน</h1><div class="page-sub">บันทึกทุกการกระทำในระบบ เพิ่มได้อย่างเดียว แก้หรือลบไม่ได้</div></div></div>' +
+    return '<div class="page-head"><div><h1>Log การทำงาน</h1><div class="page-sub">บันทึกทุกการกระทำในระบบ เพิ่มได้อย่างเดียว แก้หรือลบไม่ได้</div></div></div>' + adminTabsHtml('log') +
       '<form id="logFilter" class="admin-filters"><label class="input-wrap search">' + ICON_SEARCH + '<input name="q" type="search" placeholder="ค้นหาการกระทำ เลขที่ รายละเอียด" value="' + esc(params.get('q') || '') + '"></label>' +
       '<div class="select-wrap"><select name="by">' + opt('', 'ผู้ใช้: ทั้งหมด', who) + USERS.map((x) => opt(x.id, 'ผู้ใช้: ' + x.name, who)).join('') + '</select></div><button class="btn" type="submit">กรอง</button></form>' +
       '<div class="table-wrap"><table><thead><tr><th>เวลา</th><th>ผู้ใช้</th><th>การกระทำ</th><th>เรื่อง</th><th>รายละเอียด</th></tr></thead><tbody>' +
