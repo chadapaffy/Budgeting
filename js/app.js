@@ -2239,14 +2239,26 @@
 
   /** คอลัมน์ของไฟล์ Import (1 แถว = 1 Item · แถวที่รหัสโครงการเดียวกัน = งบเดียวกัน) */
   const IMPORT_COLS = [
-    { k: 'type', h: 'ประเภทงบ (CAPEX/OPEX)', w: 14 }, { k: 'company', h: 'บริษัท', w: 9 }, { k: 'year', h: 'ปีงบประมาณ', w: 11, num: true },
+    { k: 'type', h: 'ประเภทงบ (CAPEX/OPEX)', w: 14 }, { k: 'year', h: 'ปีงบประมาณ', w: 11, num: true },
     { k: 'group', h: 'กลุ่มงบ', w: 9 }, { k: 'code', h: 'รหัสโครงการ', w: 14 }, { k: 'name', h: 'ชื่อโครงการ / ชื่องบ', w: 30 },
     { k: 'dept', h: 'หน่วยงาน', w: 16 }, { k: 'owner', h: 'Business เจ้าของงบ', w: 18 }, { k: 'itCode', h: 'รหัส Item', w: 12 },
     { k: 'itName', h: 'ชื่อ Item', w: 28 }, { k: 'amount', h: 'วงเงิน (รวม VAT)', w: 18, num: true },
     { k: 'asset', h: 'ประเภทสินทรัพย์', w: 18 },
     { k: 'ref', h: 'อ้างอิงการอนุมัติ (ถ้ามี)', w: 20 }, { k: 'note', h: 'หมายเหตุ', w: 24 }
   ];
-  let importPreview = null; // { file, budgets: [{ data, errors, rows }] }
+  let importPreview = null; // { file, company, budgets: [{ data, errors, rows }] }
+  let importCompany = ''; // บริษัทที่เลือกก่อนนำเข้า (ไฟล์ไม่ได้ระบุบริษัท — บัญชีแต่ละบริษัททำงบของบริษัทตัวเอง)
+  let importRaw = null; // { file, sheets } ไฟล์ที่อ่านแล้ว — เปลี่ยนบริษัทแล้วตรวจใหม่ได้โดยไม่ต้องเลือกไฟล์อีก
+  function runImport() {
+    if (!importRaw || !importCompany) { importPreview = null; return; }
+    try {
+      const res = govImport(importRaw.sheets, importCompany) || importBudgets(importRaw.sheets[0].rows, importCompany);
+      importPreview = Object.assign({ file: importRaw.file, company: importCompany }, res.error ? { error: res.error } : res);
+      if (!res.error && !res.budgets.length) importPreview.error = 'ไม่พบข้อมูลในไฟล์';
+    } catch (err) {
+      importPreview = { file: importRaw.file, error: err.message || 'อ่านไฟล์ไม่ได้' };
+    }
+  }
 
   /** อ่านไฟล์ ZIP (xlsx) — รองรับไฟล์ที่บีบอัดแบบ deflate ด้วย DecompressionStream ของเบราว์เซอร์ */
   async function readZip(buf) {
@@ -2347,7 +2359,7 @@
   }
 
   /** แถวจากไฟล์ → งบ (จัดกลุ่มตามรหัสโครงการ) พร้อมตรวจความถูกต้อง */
-  function importBudgets(rows) {
+  function importBudgets(rows, company) {
     const norm = (x) => String(x == null ? '' : x).replace(/\s+/g, '').toLowerCase();
     const head = (rows[0] || []).map(norm);
     const idx = {};
@@ -2380,8 +2392,6 @@
       const typeRaw = get(r0, 'type').toUpperCase();
       const type = typeRaw === 'CAPEX' ? 'CAPEX' : '';
       if (!type) errors.push(typeRaw === 'OPEX' || typeRaw === 'CBS' ? 'งบ OPEX ให้ Business เป็นผู้สร้างและส่งอนุมัติเอง — Import ได้เฉพาะ CAPEX' : 'ประเภทงบต้องเป็น CAPEX');
-      const company = get(r0, 'company') || (db.master.companies[0] || {}).code || '';
-      if (!db.master.companies.some((c) => c.code === company)) errors.push('ไม่พบบริษัท "' + company + '" ในข้อมูลหลัก');
       const fy = num(get(r0, 'year')) || year + 1;
       const owner = findOwner(get(r0, 'owner'));
       if (!owner) errors.push('ไม่พบ Business เจ้าของงบ "' + get(r0, 'owner') + '" (ใส่ชื่อ หรือรหัสผู้ใช้)');
@@ -2415,16 +2425,15 @@
   function importTemplate() {
     const y = new Date().getFullYear() + 1;
     const ownerA = (USERS.filter(canRequestUser)[0] || {}).name || '';
-    const co = (db.master.companies[0] || {}).code || '';
     const dept = (db.master.departments[0] || {}).name || '';
     const rows = [
-      ['CAPEX', co, y, '01', 'CP-' + y + '-01', 'ตัวอย่าง: เครื่องจักรสายการผลิตใหม่', dept, ownerA, 'CP-' + y + '-01-01', 'เครื่องจักรหลัก', 1500000, assetTypeList()[0] || '', '', ''],
-      ['CAPEX', co, y, '01', 'CP-' + y + '-01', 'ตัวอย่าง: เครื่องจักรสายการผลิตใหม่', dept, ownerA, 'CP-' + y + '-01-02', 'งานติดตั้ง', 300000, assetTypeList()[0] || '', '', ''],
-      ['CAPEX', co, y, '02', 'CP-' + y + '-02', 'ตัวอย่าง: ปรับปรุงอาคารคลังสินค้า', dept, ownerA, 'CP-' + y + '-02-01', 'งานก่อสร้าง', 500000, assetTypeList()[0] || '', '', '']
+      ['CAPEX', y, '01', 'CP-' + y + '-01', 'ตัวอย่าง: เครื่องจักรสายการผลิตใหม่', dept, ownerA, 'CP-' + y + '-01-01', 'เครื่องจักรหลัก', 1500000, assetTypeList()[0] || '', '', ''],
+      ['CAPEX', y, '01', 'CP-' + y + '-01', 'ตัวอย่าง: เครื่องจักรสายการผลิตใหม่', dept, ownerA, 'CP-' + y + '-01-02', 'งานติดตั้ง', 300000, assetTypeList()[0] || '', '', ''],
+      ['CAPEX', y, '02', 'CP-' + y + '-02', 'ตัวอย่าง: ปรับปรุงอาคารคลังสินค้า', dept, ownerA, 'CP-' + y + '-02-01', 'งานก่อสร้าง', 500000, assetTypeList()[0] || '', '', '']
     ];
     const guide = [
       ['1 แถว = 1 Item · แถวที่ "รหัสโครงการ" เดียวกันรวมเป็นงบเดียวกัน (ข้อมูลระดับงบใช้จากแถวแรกของโครงการ)'],
-      ['ประเภทงบ: CAPEX เท่านั้น (งบ OPEX ให้ Business เป็นผู้สร้างและส่งอนุมัติเอง) · บริษัท: รหัสบริษัทตามข้อมูลหลัก (' + db.master.companies.map((c) => c.code).join(', ') + ')'],
+      ['ประเภทงบ: CAPEX เท่านั้น (OPEX ใช้ไฟล์รูปแบบ Governance) · ไม่ต้องใส่บริษัทในไฟล์ — เลือกบริษัทที่หน้า Import ก่อนเลือกไฟล์ ทุกงบในไฟล์จะเป็นบริษัทที่เลือก'],
       ['Business เจ้าของงบ: ชื่อ หรือรหัสผู้ใช้ (' + USERS.filter(canRequestUser).map((u) => u.name).join(', ') + ')'],
       ['หน่วยงาน: ตามข้อมูลหลัก (' + db.master.departments.map((d) => d.name).join(', ') + ')'],
       ['วงเงินรวม VAT · ประเภทสินทรัพย์ (ตามข้อมูลหลัก)'],
@@ -2439,19 +2448,25 @@
 
   function viewImport() {
     if (!can('budget.manage')) return '<div class="alert error">Import งบได้เฉพาะผู้คุมงบ</div>';
+    const cos = db.master.companies || [];
+    if (!importCompany && cos.length === 1) importCompany = cos[0].code;
+    if (importCompany && !cos.some((c) => c.code === importCompany)) importCompany = '';
     let html = '<div class="page-head"><div><h1>Import งบประจำปีจาก Excel</h1><div class="page-sub">ลงงบ CAPEX / OPEX หลายงบพร้อมกันจากไฟล์ Governance Framework — งบที่ Import จะรอ Business เจ้าของงบ ขอดำเนินการใช้งบครั้งแรก</div></div></div>' +
       takeFlash() +
-      '<section class="card form-section"><ol class="import-steps"><li>ใช้ไฟล์ Governance Framework ตัวจริงได้เลย หรือดาวน์โหลดไฟล์ตัวอย่างไปกรอก (รูปแบบรายการ Item: 1 แถวต่อ 1 Item, รหัสโครงการเดียวกัน = งบเดียวกัน)</li>' +
-      '<li>เลือกไฟล์ .xlsx หรือ .csv ระบบจะแสดงตัวอย่างและตรวจข้อมูลก่อน</li><li>กด "นำเข้า" — งบที่มีข้อผิดพลาดจะไม่ถูกนำเข้า</li></ol>' +
-      '<div class="alert info">รองรับ 2 รูปแบบ: <strong>ไฟล์ Capex / Opex Governance Framework</strong> (แผ่น "… Capex Request" / "… Opex Request" — ระบบรู้เองจากหัวตาราง) และรูปแบบรายการ Item เดิม (1 แถว = 1 Item, CAPEX เท่านั้น)</div>' +
+      '<section class="card form-section"><ol class="import-steps"><li><strong>เลือกบริษัทที่จะนำเข้า</strong> (ในไฟล์ไม่ต้องระบุบริษัท — ทุกงบในไฟล์จะเป็นบริษัทที่เลือก)</li>' +
+      '<li>เลือกไฟล์ .xlsx หรือ .csv (ใช้ไฟล์ Governance Framework ตัวจริงได้เลย หรือดาวน์โหลดไฟล์ตัวอย่างไปกรอก) ระบบจะแสดงตัวอย่างและตรวจข้อมูลก่อน</li><li>กด "นำเข้า" — งบที่มีข้อผิดพลาดจะไม่ถูกนำเข้า</li></ol>' +
+      '<div class="alert info">รองรับ 2 รูปแบบ: <strong>ไฟล์ Capex / Opex Governance Framework</strong> (แผ่นที่มีหัวตาราง "Capex ID" / "Opex ID" — ระบบรู้เองจากหัวตาราง ชื่อแผ่นอะไรก็ได้) และรูปแบบรายการ Item เดิม (1 แถว = 1 Item, CAPEX เท่านั้น)</div>' +
+      '<div class="form-grid import-company"><label class="field req"><span>บริษัทที่นำเข้า</span><div class="select-wrap"><select id="importCompany" aria-label="บริษัทที่นำเข้า">' +
+      '<option value="">— เลือกบริษัท —</option>' + cos.map((c) => opt(c.code, c.code + (c.name ? ' — ' + c.name : ''), importCompany)).join('') + '</select></div></label></div>' +
       '<div class="actions"><button type="button" class="btn" id="importTemplateGov">ไฟล์ตัวอย่างรูปแบบ Governance (.xlsx)</button>' +
       '<button type="button" class="btn" id="importTemplate">ไฟล์ตัวอย่างรูปแบบรายการ Item (.xlsx)</button>' +
-      '<label class="btn primary file-btn">เลือกไฟล์ Excel / CSV<input type="file" id="importFile" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden></label>' +
-      '<a class="btn" href="#/budgets">กลับ</a></div></section>';
+      '<label class="btn primary file-btn" id="importFileBtn"' + (importCompany ? '' : ' aria-disabled="true" title="เลือกบริษัทก่อน"') + '>เลือกไฟล์ Excel / CSV<input type="file" id="importFile"' + (importCompany ? '' : ' disabled') + ' accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden></label>' +
+      '<a class="btn" href="#/budgets">กลับ</a></div>' + (importCompany ? '' : '<p class="guard-hint">เลือกบริษัทก่อน แล้วจึงเลือกไฟล์ที่นำเข้า</p>') + '</section>';
     const pv = importPreview;
     if (!pv) return html;
     if (pv.error) return html + '<div class="alert error">' + esc(pv.file) + ': ' + esc(pv.error) + '</div>';
     const okList = pv.budgets.filter((x) => !x.errors.length);
+    html += '<div class="alert info">นำเข้าเป็นบริษัท <strong>' + esc(pv.company || importCompany) + '</strong> ทุกงบในไฟล์</div>';
     if (pv.kind === 'gov') {
       html += '<div class="alert info">อ่านไฟล์รูปแบบ Governance: พบ ' + pv.sheets + ' แผ่นรายการ' + (pv.skipped.length ? ' · <strong>ข้าม ' + pv.skipped.length + ' แถวที่สถานะไม่ใช่ "' + GOV_APPROVED + '"</strong> (' +
         esc(pv.skipped.slice(0, 8).map((x) => x.code || 'แถว ' + x.line).join(', ')) + (pv.skipped.length > 8 ? ' …' : '') + ')' : '') + '</div>' +
@@ -2488,21 +2503,25 @@
     };
     tpl.addEventListener('click', () => download(importTemplate(), 'budget-import-template.xlsx'));
     document.getElementById('importTemplateGov').addEventListener('click', () => download(govTemplate(), 'budget-governance-template.xlsx'));
+    document.getElementById('importCompany').addEventListener('change', (e) => {
+      importCompany = e.target.value;
+      runImport(); // เปลี่ยนบริษัทแล้วตรวจไฟล์เดิมใหม่ให้เลย
+      render();
+    });
     document.getElementById('importFile').addEventListener('change', async (e) => {
       const f = e.target.files[0];
-      if (!f) return;
+      if (!f || !importCompany) return;
       try {
-        const sheets = /\.csv$/i.test(f.name) ? [{ name: f.name, rows: parseCsv(await f.text()) }] : await readXlsxSheets(await f.arrayBuffer());
-        const res = govImport(sheets) || importBudgets(sheets[0].rows);
-        importPreview = Object.assign({ file: f.name }, res.error ? { error: res.error } : res);
-        if (!res.error && !res.budgets.length) importPreview.error = 'ไม่พบข้อมูลในไฟล์';
+        importRaw = { file: f.name, sheets: /\.csv$/i.test(f.name) ? [{ name: f.name, rows: parseCsv(await f.text()) }] : await readXlsxSheets(await f.arrayBuffer()) };
+        runImport();
       } catch (err) {
+        importRaw = null;
         importPreview = { file: f.name, error: err.message || 'อ่านไฟล์ไม่ได้' };
       }
       render();
     });
     const clear = document.getElementById('importClear');
-    if (clear) clear.addEventListener('click', () => { importPreview = null; render(); });
+    if (clear) clear.addEventListener('click', () => { importPreview = null; importRaw = null; render(); });
     const goBtn = document.getElementById('importGo');
     if (goBtn) goBtn.addEventListener('click', () => {
       const ok = importPreview.budgets.filter((x) => !x.errors.length && !db.budgets.some((b) => b.code === x.data.code && b.state !== 'cancelled'));
@@ -2516,10 +2535,12 @@
         db.budgets.push(b);
       });
       ensureMaster(db);
-      logAction('Import งบจาก Excel', '', importPreview.file + ' · ' + ok.length + ' งบ');
+      logAction('Import งบจาก Excel', '', importPreview.file + ' · บริษัท ' + importPreview.company + ' · ' + ok.length + ' งบ');
       save();
+      const co = importPreview.company;
       importPreview = null;
-      setFlash('success', 'นำเข้า ' + ok.length + ' งบแล้ว — รอ Business เจ้าของงบ ขอดำเนินการใช้งบ');
+      importRaw = null;
+      setFlash('success', 'นำเข้า ' + ok.length + ' งบของบริษัท ' + co + ' แล้ว — รอ Business เจ้าของงบ เปิดใช้งบ');
       go('#/budgets');
     });
   }
@@ -3094,7 +3115,7 @@
     ];
     const guide = [
       ['รูปแบบเดียวกับไฟล์ Capex / Opex Governance Framework และไฟล์ที่ระบบ Export (เลือก "รูปแบบไฟล์ Governance")'],
-      ['ชื่อแผ่นงานขึ้นต้นด้วยรหัสบริษัท แล้วตามด้วย "Capex Request" หรือ "Opex Request" เช่น "' + co + ' Capex Request" — ระบบใช้ชื่อแผ่นงานระบุบริษัท'],
+      ['ไม่ต้องระบุบริษัทในไฟล์ — เลือกบริษัทที่หน้า Import ก่อนเลือกไฟล์ ทุกงบในไฟล์จะเป็นบริษัทที่เลือก · ชื่อแผ่นงานอะไรก็ได้ (ระบบหาแผ่นรายการจากหัวตาราง "Capex ID" / "Opex ID")'],
       ['หัวตารางอยู่แถวที่ 3 ข้อมูลเริ่มแถวที่ 4 (ระบบหาแถวหัวตารางจาก "Capex ID" / "Opex ID" ให้เอง) · แถวที่ไม่มี ID (เช่น แถวรวม) จะถูกข้าม'],
       ['นำเข้าเฉพาะแถวที่ "สถานะอนุมัติ" = "' + GOV_APPROVED + '" · แถวอื่นถูกข้าม และแจ้งในหน้าตรวจข้อมูล'],
       ['แผ่น "สรุปโปรเจ็ค" (ถ้ามี) ใช้อ่าน "กลุ่มรายการ" ของแต่ละ ID · ตาราง Pivot ด้านขวาไม่ถูกนำเข้า'],
@@ -3109,7 +3130,7 @@
    * อ่านไฟล์รูปแบบ Governance → { budgets, skipped, notes } · คืน null ถ้าไฟล์นี้ไม่ใช่รูปแบบ Governance
    * sheets = [{ name, rows }]
    */
-  function govImport(sheets) {
+  function govImport(sheets, company) {
     const headOf = (sh, test) => {
       for (let i = 0; i < Math.min(sh.rows.length, 12); i++) {
         const h = (sh.rows[i] || []).map(normTxt);
@@ -3148,8 +3169,8 @@
     };
     const budgets = [];
     const skipped = [];
+    const notes = [];
     const seen = new Set();
-    const newCos = new Set();
     const newDepts = new Set();
     lists.forEach(({ sh, i, h, type }) => {
       const col = (test) => h.findIndex((x) => x && test(x));
@@ -3159,10 +3180,10 @@
         reason: col((x) => x.startsWith('เหตุผลสนับสนุน')), amount: col((x) => x.startsWith('มูลค่า')), year: col((x) => x.startsWith('เฉลี่ยปี') || x === 'ปีงบประมาณ'),
         owner: col((x) => x.startsWith('owner') || x.startsWith('เจ้าของactionplan')), fin: col((x) => x.startsWith('เจ้าของฝ่ายการเงิน')), status: col((x) => x.startsWith('สถานะอนุมัติ'))
       };
+      // ชื่อแผ่นงานที่ขึ้นต้นด้วยรหัสบริษัทอื่น (เช่น ไฟล์ที่ระบบ Export) — ใช้บริษัทที่เลือกไว้เสมอ แต่แจ้งเตือน
       const m = String(sh.name).match(/^(.*?)\s*(capex|opex)\s*request/i);
-      const coRaw = m ? m[1].trim() : '';
-      const known = (db.master.companies || []).find((c) => normTxt(c.code) === normTxt(coRaw));
-      const company = known ? known.code : coRaw;
+      const prefix = m ? m[1].trim() : '';
+      if (prefix && normTxt(prefix) !== normTxt(company)) notes.push('แผ่น "' + sh.name + '" ระบุบริษัท ' + prefix + ' — นำเข้าเป็นบริษัท ' + company + ' ตามที่เลือก');
       const get = (r, k) => (ix[k] >= 0 && r[ix[k]] !== undefined && r[ix[k]] !== null ? String(r[ix[k]]).trim() : '');
       sh.rows.slice(i + 1).forEach((r, k) => {
         const line = i + k + 2;
@@ -3176,8 +3197,6 @@
           skipped.push({ sheet: sh.name, line, code, status: get(r, 'status') });
           return;
         }
-        if (!coRaw) errors.push('ระบุบริษัทไม่ได้ — ตั้งชื่อแผ่นงานเป็น "<รหัสบริษัท> ' + (type === 'CAPEX' ? 'Capex' : 'Opex') + ' Request"');
-        else if (!known) newCos.add(coRaw);
         if (!name) errors.push('ไม่ได้ระบุชื่อโครงการ');
         const amount = round2(num(get(r, 'amount')));
         if (!(amount > 0)) errors.push('มูลค่าต้องมากกว่า 0 (ถ้าเป็นสูตร ให้เปิดไฟล์ใน Excel แล้วบันทึกอีกครั้ง เพื่อให้มีค่าที่คำนวณแล้ว)');
@@ -3205,8 +3224,6 @@
         budgets.push({ data, errors, warnings, lines: 1, sheet: sh.name });
       });
     });
-    const notes = [];
-    if (newCos.size) notes.push('บริษัทที่ยังไม่มีในข้อมูลหลัก (จะเพิ่มให้อัตโนมัติ): ' + Array.from(newCos).join(', '));
     if (newDepts.size) notes.push('หน่วยงานที่ยังไม่มีในข้อมูลหลัก (จะเพิ่มให้อัตโนมัติ): ' + Array.from(newDepts).join(', '));
     return { kind: 'gov', budgets, skipped, notes, sheets: lists.length };
   }
