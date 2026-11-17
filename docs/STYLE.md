@@ -63,6 +63,7 @@
 | แบนเนอร์เตือน | `.alert.info` / `.success` / `.error` / `.warn` (warn ใช้ `--decision`) |
 | สถานะว่าง | `.empty` |
 | Modal / ตัวแสดงไฟล์ | `.viewer` (พื้นมืด `rgba(20,20,15,.45)`), panel มุม 14px |
+| ฟอร์มใน Modal (เช่น เพิ่ม/แก้ผู้ใช้) | `.viewer` > `.viewer-panel.is-form` (กว้าง ≤ 680px สูงตามเนื้อหา) > `.viewer-head` + `.viewer-form` · ปิดด้วยปุ่ม ✕ / ยกเลิก / Esc / คลิกพื้นหลัง · แจ้งข้อผิดพลาดใน Modal ด้วย `.alert.error` |
 | ฟอร์ม | `.field` (label + input / select), ช่องจำเป็นมี `*` สีแดง |
 
 ## ตรวจก่อนส่งงาน

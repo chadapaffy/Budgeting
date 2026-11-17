@@ -107,4 +107,31 @@ select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000004
 select pg_temp.expect_fail($$select public.v2_list_users()$$, 'บัญชีที่ปิดใช้งานเข้าไม่ได้');
 
 reset role;
+
+-- ---------------------------------------------------------------- เปิดใช้ครั้งแรก (v2_activation_status)
+reset role;
+create or replace function pg_temp.ok(c boolean, label text) returns void language plpgsql as $$
+begin if not c then raise exception 'FAIL: %', label; end if; raise notice 'PASS: %', label; end $$;
+grant execute on function pg_temp.ok(boolean, text) to public;
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000000009', 'newbie@example.com');
+insert into public.v2_profiles (id, email, name, role) values ('00000000-0000-0000-0000-000000000009', 'newbie@example.com', 'Newbie', 'business');
+select pg_temp.ok((select password_set_at from public.v2_profiles where email = 'newbie@example.com') is null, 'บัญชีที่ Admin เพิ่มใหม่ยังไม่มี password_set_at');
+set role anon;
+select pg_temp.ok(public.v2_activation_status(' NEWBIE@example.com ') = 'ready', 'อีเมลที่ Admin เพิ่ม ยังไม่เคยตั้งรหัสผ่าน = ready (ไม่สนตัวพิมพ์/ช่องว่าง)');
+select pg_temp.ok(public.v2_activation_status('nobody@example.com') = 'not_found', 'อีเมลที่ไม่มี = not_found');
+select pg_temp.ok(public.v2_activation_status('admin2@example.com') = 'inactive', 'บัญชีที่ปิดใช้งาน = inactive');
+select pg_temp.ok(public.v2_activation_status('ctrl@example.com') = 'has_password', 'บัญชีที่เคยล็อกอิน (backfill/ล็อกอินแล้ว) = has_password');
+select pg_temp.ok(public.v2_activation_status(null) = 'not_found', 'อีเมลว่าง = not_found');
+select pg_temp.expect_fail($$select * from public.v2_profiles$$, 'anon อ่านโปรไฟล์ตรงๆ ไม่ได้');
+reset role; set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000009', false);
+select public.v2_me(true);
+reset role; set role anon;
+select pg_temp.ok(public.v2_activation_status('newbie@example.com') = 'has_password', 'ล็อกอินสำเร็จแล้ว (v2_me login) = has_password');
+reset role;
+-- Admin รีเซ็ต (Edge Function ตั้ง password_set_at = null) → กลับมา ready
+update public.v2_profiles set password_set_at = null where email = 'newbie@example.com';
+set role anon;
+select pg_temp.ok(public.v2_activation_status('newbie@example.com') = 'ready', 'หลัง Admin รีเซ็ต = ready อีกครั้ง');
+reset role;
 \echo ALL V2 TESTS PASSED

@@ -137,24 +137,11 @@
     }
   }
 
-  /**
-   * ลิงก์ตั้งรหัสผ่าน (recovery) ของ Supabase พาผู้ใช้กลับมาที่ #access_token=...&type=recovery — รับ token นั้นเป็น session
-   * คืน 'recovery' | 'invite' ถ้าเป็นลิงก์ที่รับได้, { error } ถ้าลิงก์หมดอายุ/ใช้แล้ว, null ถ้าไม่ใช่ลิงก์ของ Supabase
-   */
-  function adoptSessionFromHash(hash) {
-    const h = String(hash || '');
-    if (!/^#(access_token|error)=/.test(h) && !/^#error_code=/.test(h)) return null;
-    const q = new URLSearchParams(h.slice(1));
-    if (q.get('error') || q.get('error_code')) return { error: /expired|invalid/i.test(q.get('error_description') || q.get('error_code') || '') ? 'ลิงก์หมดอายุหรือถูกใช้ไปแล้ว — ให้ผู้ดูแลระบบสร้างลิงก์ใหม่' : (q.get('error_description') || 'ลิงก์ไม่ถูกต้อง') };
-    const token = q.get('access_token');
-    let claims = {};
-    try { claims = JSON.parse(decodeURIComponent(escape(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))))); } catch (e) { return { error: 'ลิงก์ไม่ถูกต้อง' }; }
-    saveSession({
-      access_token: token, refresh_token: q.get('refresh_token') || '',
-      expires_at: Number(q.get('expires_at')) || (claims.exp || nowSec() + 3600),
-      user: { id: claims.sub, email: claims.email }
-    });
-    return q.get('type') === 'invite' ? 'invite' : 'recovery';
+  /** เรียก Edge Function แบบยังไม่ล็อกอิน (ใช้เฉพาะคำสั่งสาธารณะ เช่น เปิดใช้ครั้งแรก) */
+  async function invokeAnon(name, body) {
+    const r = await http('/functions/v1/' + name, { method: 'POST', headers: Object.assign(baseHeaders(), { Authorization: 'Bearer ' + CFG.supabaseAnonKey }), body: JSON.stringify(body || {}) });
+    if (!r.ok) throw new ApiError((r.body && (r.body.message || r.body.error)) || 'ทำรายการไม่สำเร็จ (' + r.status + ')', r.status, 'FUNCTION');
+    return r.body;
   }
 
   window.RemoteApi = {
@@ -165,7 +152,6 @@
     signIn,
     signOut,
     updatePassword,
-    adoptSessionFromHash,
     invoke,
     // ---- ระบบบัญชีรอบใหม่ (supabase/schema_v2.sql)
     v2Me: (login) => rpc('v2_me', { p_login: !!login }),
@@ -173,6 +159,8 @@
     v2ListUsers: () => rpc('v2_list_users'),
     v2UpdateUser: (u) => rpc('v2_update_user', { p_id: u.id, p_name: u.name, p_title: u.title || '', p_department: u.department || '', p_company: u.company || '', p_companies: u.companies || [], p_role: u.role }),
     v2RequestReset: (email) => rpcAnon('v2_request_reset', { p_email: email }),
+    v2ActivationStatus: (email) => rpcAnon('v2_activation_status', { p_email: email }),
+    activate: (email, password) => invokeAnon('v2-admin-users', { action: 'activate', email, password }),
     v2ListRoles: () => rpc('v2_list_roles'),
     v2SaveRole: (r) => rpc('v2_save_role', { p_key: r.key, p_name: r.name, p_description: r.description || '', p_permissions: r.permissions || [] }),
     v2DeleteRole: (key) => rpc('v2_delete_role', { p_key: key }),
