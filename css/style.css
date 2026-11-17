@@ -873,8 +873,7 @@ input.locked { background: var(--surface-2, #f3f4f6); color: var(--muted, #6b728
 .budget-table .b-acts { min-width: 6rem; }
 .budget-table td .badge { white-space: normal; display: inline-block; max-width: 8.5rem; line-height: 1.35; text-align: left; }
 
-/* =====================================================================
- * Theme layer — ตาม docs/STYLE.md (ชั้นนี้อยู่ท้ายไฟล์ ทับกฎด้านบน)
+/* ============================================================== * Theme layer — ตาม docs/STYLE.md (ชั้นนี้อยู่ท้ายไฟล์ ทับกฎด้านบน)
  * ===================================================================== */
 html { color-scheme: light; }
 body { font-family: var(--font-body); font-size: var(--fs-base); color: var(--ink); background: var(--paper); }
@@ -1187,3 +1186,7 @@ button.link { color: var(--brand); }
 .viewer[hidden] { display: none; }
 .viewer-panel.is-form { width: min(680px, 100%); height: auto; max-height: 94vh; }
 .viewer-form { padding: var(--s-4) var(--s-5) var(--s-5); overflow: auto; }
+/* แถบสถานะการบันทึกข้อมูล (โหมด Supabase) — จัดวางเท่านั้น สี/ขนาดใช้ของ .alert */
+.sync-bar { position: fixed; right: 16px; bottom: 16px; z-index: 900; max-width: min(440px, calc(100vw - 32px)); }
+.sync-bar .alert { margin: 0; box-shadow: var(--shadow); }
+.sync-bar .actions { margin-top: var(--s-2); }

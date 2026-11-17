@@ -642,6 +642,7 @@
     return '';
   }
   const authLog = (u, action, detail) => {
+    if (AUTH_REMOTE) return; // โหมด Supabase: บัญชีและ Log อยู่บนเซิร์ฟเวอร์
     // ล็อกอิน/ตั้งรหัสผ่านเกิดก่อนมีผู้ใช้ปัจจุบัน — บันทึกในข้อมูลหลักด้วย id ของบัญชีนั้น
     try {
       const d = db || load();
@@ -950,6 +951,7 @@
   window.AppRoles = { list: () => Object.keys(DEMO_ROLE_PERMS).map((k) => ({ key: k, name: ROLE_LABEL[k] || k, builtin: isSystemRole(k), perms: DEMO_ROLE_PERMS[k].slice() })), savePerms: rolesSavePerms, create: rolesCreate, remove: rolesRemove, reset: rolesReset };
 
   function save() {
+    if (AUTH_REMOTE) { syncSchedule(); return true; } // โหมด Supabase: ส่งเอกสารที่เปลี่ยนไปเซิร์ฟเวอร์
     if (REMOTE) { console.error('save() ถูกเรียกในโหมด Supabase — ข้อมูลต้องบันทึกผ่านเซิร์ฟเวอร์'); return; }
     try {
       localStorage.setItem(DB_KEY, JSON.stringify(db));
@@ -961,7 +963,7 @@
   }
 
   function nextId(prefix) {
-    if (REMOTE) {
+    if (REMOTE || AUTH_REMOTE) {
       // โหมด Supabase: หลายคนสร้างรายการพร้อมกันได้ จึงใช้รหัสสุ่มแทนตัวนับในเครื่อง
       const a = new Uint8Array(6);
       window.crypto.getRandomValues(a);
@@ -1011,6 +1013,11 @@
    * REQ คำขอเบิกใช้งบ · INC คำขอเพิ่มงบ · MEMO บันทึกข้อความ · CAPEX / OPEX ใบเบิกใช้งบ · TRF โยกงบ · DEC ลดงบ
    * (เลขที่ฝ่ายอื่นเป็นคนออก เช่น รหัสโครงการ / Item No. / PR / PO / เลขที่มติ / ใบเสร็จ ให้ผู้ใช้กรอกเอง)
    */
+  function randomToken(len) {
+    const a = new Uint8Array(len);
+    window.crypto.getRandomValues(a);
+    return Array.from(a, (x) => (x % 36).toString(36)).join('');
+  }
   const DOC_PREFIX = { req: 'REQ', inc: 'INC', memo: 'MEMO', CAPEX: 'CAPEX', CBS: 'OPEX', trf: 'TRF', dec: 'DEC' };
   function usedNumbers() {
     const out = [];
@@ -1021,6 +1028,8 @@
   }
   function nextNo(prefix, at) {
     const year = new Date(at || Date.now()).getFullYear();
+    // โหมด Supabase: เซิร์ฟเวอร์ออกเลขจริง (ไม่ซ้ำ ไม่มีช่องว่าง) ตอนบันทึก — ที่นี่ใส่ token ชั่วคราว แล้วเซิร์ฟเวอร์แทนที่เป็นเลขที่
+    if (AUTH_REMOTE) return '@@NO:' + prefix + '-' + year + ':' + randomToken(10) + '@@';
     const head = prefix + '-' + year + '-';
     const key = prefix + '-' + year;
     db.seq.no = db.seq.no || {};
@@ -1078,7 +1087,7 @@
    * — เห็นทุกงานของบริษัทนั้นแม้ไม่ใช่ผู้รับผิดชอบ · บัญชีที่ไม่มี companies (เช่นโหมด Supabase ที่ฐานข้อมูลคุมสิทธิ์) และ Admin เห็นทุกบริษัท
    * · คืน null = ไม่จำกัด
    */
-  const companyScope = () => { const u = me(); return Array.isArray(u.companies) && u.role !== 'admin' ? u.companies : null; };
+  const companyScope = () => { const u = me(); return Array.isArray(u.companies) && u.role !== 'admin' && roleSeesWork(u.role) ? u.companies : null; };
   const scopeOk = (company) => { const sc = companyScope(); return !sc || sc.includes(company); };
   const budgetScoped = (b) => !!b && scopeOk(b.company);
   const reqScoped = (r) => !!r && budgetScoped(budgetById(r.budgetId));
@@ -6967,7 +6976,7 @@
         esc([me().title, roleLabel(me())].filter(Boolean).join(' · ')) + '</small>' +
         (me().email ? '<small>' + esc(me().email) + '</small>' : '') + '</div><hr>';
       menu.innerHTML = who + (REMOTE ? '' : '<button type="button" role="menuitem" data-account>บัญชีของฉัน</button>') +
-        (REMOTE ? '' : '<button type="button" role="menuitem" class="danger" data-clear-all>ล้างข้อมูลทดสอบ (งบ คำขอ เอกสาร Log)</button><button type="button" role="menuitem" data-reset>โหลดข้อมูลตัวอย่าง</button><hr>') +
+        (REMOTE || AUTH_REMOTE ? '' : '<button type="button" role="menuitem" class="danger" data-clear-all>ล้างข้อมูลทดสอบ (งบ คำขอ เอกสาร Log)</button><button type="button" role="menuitem" data-reset>โหลดข้อมูลตัวอย่าง</button><hr>') +
         '<button type="button" role="menuitem" data-logout>ออกจากระบบ</button>';
     };
     renderUserButton();
@@ -7091,6 +7100,243 @@
   }
 
 
+  // ---------------------------------------------------------------- ซิงก์ข้อมูลงบกับ Supabase (เฟส 2a)
+  // เก็บเป็นเอกสารรายตัว (master / budget / request / change) + Log · ฟังก์ชันบนฐานข้อมูล v2_load / v2_save_docs (supabase/schema_v2b.sql)
+  // แอปแก้ข้อมูลใน db แล้วเรียก save() ตามเดิม → save() ตั้งเวลาให้ syncPush() ส่งเฉพาะเอกสารที่เปลี่ยน (เทียบกับ snapshot ล่าสุดที่ตรงกับเซิร์ฟเวอร์)
+  const SYNC_KINDS = [['budget', 'budgets'], ['request', 'requests'], ['change', 'changes']];
+  const sync = { docs: new Map(), since: null, timer: null, retryTimer: null, pollTimer: null, inflight: false, again: false, status: 'idle', error: '' };
+  const syncKey = (kind, id) => kind + ':' + id;
+  const tokenRe = /@@NO:[A-Z]{2,10}-[0-9]{4}:[A-Za-z0-9]{4,24}@@/g;
+
+  /** เอกสารทั้งหมดในหน่วยความจำ → [{kind,id,obj}] (ข้อมูลหลักส่งได้เฉพาะผู้มีสิทธิ์จัดการข้อมูลหลัก) */
+  function syncCollect() {
+    const out = [];
+    if (can('master.manage') || sync.docs.has(syncKey('master', 'master'))) out.push({ kind: 'master', id: 'master', obj: db.master });
+    SYNC_KINDS.forEach(([kind, col]) => (db[col] || []).forEach((o) => { if (o && o.id) out.push({ kind, id: o.id, obj: o }); }));
+    return out;
+  }
+  const logMeta = (e) => {
+    const l = refLink(e.ref);
+    let company = '';
+    const m = /^#\/(budget|request|change)\/(.+)$/.exec(l.href || '');
+    if (m) {
+      const doc = m[1] === 'budget' ? budgetById(m[2]) : m[1] === 'request' ? requestById(m[2]) : (db.changes || []).find((c) => c.id === m[2]);
+      const b = m[1] === 'budget' ? doc : doc && budgetById(doc.budgetId);
+      company = (b && b.company) || '';
+    }
+    return { company, ownerId: l.owner || '' };
+  };
+  /** สิ่งที่ต้องส่ง: เอกสารใหม่/ที่เปลี่ยน/ที่ถูกลบ + Log ที่ยังไม่ได้ส่ง */
+  function syncDiff() {
+    const docs = [];
+    const jsons = new Map();
+    const seen = new Set();
+    syncCollect().forEach(({ kind, id, obj }) => {
+      const key = syncKey(kind, id);
+      seen.add(key);
+      const json = JSON.stringify(obj);
+      const snap = sync.docs.get(key);
+      if (snap && snap.json === json) return;
+      if (kind === 'master' && !can('master.manage')) return;
+      docs.push({ kind, id, version: snap ? snap.version : 0, data: obj });
+      jsons.set(key, json);
+    });
+    sync.docs.forEach((snap, key) => {
+      if (seen.has(key) || key === 'master:master') return;
+      const [kind, id] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+      docs.push({ kind, id, version: snap.version, deleted: true });
+    });
+    const entries = (db.log || []).filter((x) => x.id == null);
+    const log = entries.map((e) => Object.assign({ action: e.action, ref: e.ref, detail: e.detail }, logMeta(e)));
+    return { docs, jsons, entries, log };
+  }
+  const syncDirty = () => { try { const d = syncDiff(); return d.docs.length > 0 || d.log.length > 0; } catch (e) { return false; } };
+
+  function replaceTokensDeep(o, map) {
+    if (o && typeof o === 'object') {
+      Object.keys(o).forEach((k) => {
+        const v = o[k];
+        if (typeof v === 'string') { if (v.indexOf('@@NO:') >= 0) o[k] = v.replace(tokenRe, (t) => map[t] || t); } else replaceTokensDeep(v, map);
+      });
+    }
+  }
+  const replaceTokensStr = (str, map) => str.replace(tokenRe, (t) => map[t] || t);
+
+  function syncSchedule() {
+    clearTimeout(sync.timer);
+    sync.timer = setTimeout(syncPush, 300);
+  }
+
+  async function syncPush() {
+    clearTimeout(sync.timer);
+    if (!AUTH_REMOTE || !accountsReady) return;
+    if (sync.inflight) { sync.again = true; return; }
+    const batch = syncDiff();
+    if (!batch.docs.length && !batch.log.length) { syncStatus('idle'); return; }
+    sync.inflight = true;
+    syncStatus('saving');
+    let res;
+    try {
+      res = await window.RemoteApi.v2SaveDocs(batch.docs, batch.log);
+    } catch (e) {
+      sync.inflight = false;
+      await syncPushFailed(e);
+      return;
+    }
+    sync.inflight = false;
+    const tokens = res.tokens || {};
+    const hasTokens = Object.keys(tokens).length > 0;
+    res.docs.forEach((d) => {
+      const key = syncKey(d.kind, d.id);
+      const del = batch.docs.find((x) => x.kind === d.kind && x.id === d.id && x.deleted);
+      if (del) sync.docs.delete(key); else sync.docs.set(key, { version: d.version, json: replaceTokensStr(batch.jsons.get(key), tokens) });
+    });
+    if (hasTokens) {
+      replaceTokensDeep(db.master, tokens);
+      SYNC_KINDS.forEach(([, col]) => (db[col] || []).forEach((o) => replaceTokensDeep(o, tokens)));
+      batch.entries.forEach((e) => replaceTokensDeep(e, tokens));
+    }
+    batch.entries.forEach((e, i) => { const at = db.log.indexOf(e); if (at >= 0 && res.log[i]) db.log[at] = res.log[i]; });
+    sync.error = '';
+    if (sync.again || syncDirty()) { sync.again = false; syncSchedule(); } else syncStatus('idle');
+    if (hasTokens) syncRerender();
+  }
+
+  async function syncPushFailed(e) {
+    const msg = (e && e.message) || '';
+    if (e && e.code === 'AUTH') { syncStatus('idle'); logoutDemo(); showLoginDemo('login', { error: e.message }); return; }
+    if (/CONFLICT/.test(msg)) {
+      // มีผู้อื่นแก้เอกสารเดียวกันไปก่อน → โหลดข้อมูลล่าสุดมาแทน (การแก้ไขที่ยังไม่ถูกบันทึกของเรื่องนั้นหายไป)
+      syncStatus('conflict');
+      try { await syncPull(true); } catch (err) { /* แสดงสถานะ conflict ต่อ */ }
+      syncRerender(true);
+      return;
+    }
+    if (e && e.code === 'NETWORK') {
+      syncStatus('retry', msg);
+      clearTimeout(sync.retryTimer);
+      sync.retryTimer = setTimeout(syncPush, 8000);
+      return;
+    }
+    syncStatus('error', msg);
+  }
+
+  /** โหลดเอกสารจากเซิร์ฟเวอร์: full = ทั้งหมด (แทนที่ในเครื่อง) · ไม่ใช่ = เฉพาะที่เปลี่ยนตั้งแต่ครั้งก่อน คืน true ถ้ามีอะไรเปลี่ยน */
+  async function syncPull(full) {
+    const res = await window.RemoteApi.v2Load(full ? null : sync.since);
+    let changed = false;
+    if (full) {
+      const shell = emptyDb();
+      shell.budgets = []; shell.requests = []; shell.changes = []; shell.log = [];
+      const m = res.docs.find((d) => d.kind === 'master');
+      if (m) shell.master = m.data;
+      SYNC_KINDS.forEach(([kind, col]) => { shell[col] = res.docs.filter((d) => d.kind === kind).map((d) => d.data); });
+      shell.log = res.log.slice();
+      db = migrate(shell);
+      sync.docs = new Map();
+      res.docs.forEach((d) => { if (d.kind !== 'master') sync.docs.set(syncKey(d.kind, d.id), { version: d.version, json: '' }); });
+      if (m) sync.docs.set('master:master', { version: m.version, json: '' });
+      changed = true;
+    } else {
+      res.docs.forEach((d) => {
+        const key = syncKey(d.kind, d.id);
+        const snap = sync.docs.get(key);
+        if (snap && snap.version === d.version) return; // ของเราเอง / ไม่เปลี่ยน
+        const col = (SYNC_KINDS.find(([k]) => k === d.kind) || [])[1];
+        const list = col ? db[col] : null;
+        const cur = d.kind === 'master' ? db.master : list && list.find((o) => o.id === d.id);
+        if (cur && snap && JSON.stringify(cur) !== snap.json) return; // มีการแก้ไขในเครื่องที่ยังไม่ได้ส่ง — คงไว้ (ถ้าชนจะแจ้งตอนบันทึก)
+        if (d.deleted) {
+          if (list && cur) list.splice(list.indexOf(cur), 1);
+          sync.docs.delete(key);
+          changed = true;
+          return;
+        }
+        if (d.kind === 'master') db.master = d.data;
+        else if (cur) list[list.indexOf(cur)] = d.data;
+        else list.push(d.data);
+        sync.docs.set(key, { version: d.version, json: '' });
+        changed = true;
+      });
+      const have = new Set((db.log || []).filter((x) => x.id != null).map((x) => x.id));
+      const fresh = res.log.filter((x) => !have.has(x.id));
+      if (fresh.length) { db.log = (db.log || []).filter((x) => x.id != null).concat(fresh).concat((db.log || []).filter((x) => x.id == null)); changed = true; }
+      if (changed) migrate(db);
+    }
+    // snapshot = JSON ของข้อมูลในเครื่องหลัง migrate (ให้ตรงกับที่จะเทียบตอนบันทึก — ไม่ใช่ JSON จากเซิร์ฟเวอร์ซึ่งเรียงคีย์ต่างกัน)
+    syncCollectAll().forEach(({ kind, id, obj }) => {
+      const key = syncKey(kind, id);
+      const snap = sync.docs.get(key);
+      if (snap && snap.json === '') snap.json = JSON.stringify(obj);
+    });
+    sync.since = res.now;
+    return changed;
+  }
+  function syncCollectAll() {
+    const out = [{ kind: 'master', id: 'master', obj: db.master }];
+    SYNC_KINDS.forEach(([kind, col]) => (db[col] || []).forEach((o) => { if (o && o.id) out.push({ kind, id: o.id, obj: o }); }));
+    return out;
+  }
+
+  async function syncPoll() {
+    if (!AUTH_REMOTE || !accountsReady || sync.inflight || document.visibilityState !== 'visible') return;
+    try {
+      const changed = await syncPull(false);
+      if (changed) syncRerender();
+      await loadRemoteRoles();
+      await refreshAccounts();
+      adminTabsRefresh();
+    } catch (e) {
+      if (e && e.code === 'AUTH') { logoutDemo(); showLoginDemo('login', { error: e.message }); }
+    }
+  }
+  const adminTabsRefresh = () => { if (accountsReady) renderNav(location.hash.split('?')[0] || ''); };
+  function syncStartPolling() {
+    if (sync.pollTimer) return;
+    sync.pollTimer = setInterval(syncPoll, 30000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncPoll(); });
+    window.addEventListener('beforeunload', (e) => {
+      if (accountsReady && (sync.inflight || syncDirty())) { e.preventDefault(); e.returnValue = ''; }
+    });
+  }
+  /** วาดหน้าใหม่ถ้าไม่ได้กำลังกรอกฟอร์ม (force = วาดเสมอ เช่นหลังโหลดข้อมูลใหม่เพราะชนกัน) */
+  function syncRerender(force) {
+    if (!accountsReady) return;
+    const ae = document.activeElement;
+    const typing = ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && document.getElementById('app').contains(ae);
+    if (!force && (typing || isFormHash(location.hash || ''))) return;
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+  }
+
+  function syncStatus(status, message) {
+    sync.status = status;
+    let bar = document.getElementById('syncBar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'syncBar';
+      bar.className = 'sync-bar no-print';
+      bar.setAttribute('role', 'status');
+      document.body.appendChild(bar);
+    }
+    const retryBtn = '<div class="actions"><button type="button" class="btn small" data-sync-reload>โหลดข้อมูลล่าสุด (ทิ้งการแก้ไขที่ยังไม่ได้บันทึก)</button></div>';
+    const html = {
+      idle: '',
+      saving: '<div class="alert info">กำลังบันทึก…</div>',
+      retry: '<div class="alert warn">เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — กำลังลองบันทึกใหม่ (อย่าปิดหน้านี้)</div>',
+      conflict: '<div class="alert warn">มีผู้อื่นแก้ข้อมูลเดียวกันไปก่อน — โหลดข้อมูลล่าสุดให้แล้ว การแก้ไขล่าสุดของคุณในเรื่องนั้นไม่ถูกบันทึก กรุณาตรวจแล้วทำซ้ำ <button type="button" class="btn small" data-sync-close>ปิด</button></div>',
+      error: '<div class="alert error">บันทึกไม่สำเร็จ: ' + esc(message || '') + retryBtn + '</div>'
+    }[status] || '';
+    bar.innerHTML = html;
+    bar.hidden = !html;
+    const rl = bar.querySelector('[data-sync-reload]');
+    if (rl) rl.addEventListener('click', async () => { try { await syncPull(true); syncStatus('idle'); syncRerender(true); } catch (e) { syncStatus('error', e.message); } });
+    const cl = bar.querySelector('[data-sync-close]');
+    if (cl) cl.addEventListener('click', () => syncStatus('idle'));
+  }
+  window.AppSync = { push: syncPush, pull: syncPull, poll: syncPoll, status: () => sync.status, dirty: syncDirty };
+
   // ---- เข้าสู่ระบบบน Supabase (เฟส 1) ----------------------------------------------------------
   async function remoteAuthSubmit(m, form, email) {
     const api = window.RemoteApi;
@@ -7139,6 +7385,7 @@
         USERS = [profileToUser(meRow)];
         await loadRemoteRoles();
         await refreshAccounts();
+        await syncPull(true); // โหลดข้อมูลงบทั้งหมดที่ผู้ใช้เห็น
       }
     } catch (e) {
       if (e && e.code === 'AUTH') { showLoginDemo('login', { error: e.message }); return; }
@@ -7155,6 +7402,8 @@
       return;
     }
     accountsReady = true;
+    syncStartPolling();
+    syncSchedule(); // ผู้ดูแลระบบเข้าครั้งแรก: สร้างเอกสารข้อมูลหลักตั้งต้นบนเซิร์ฟเวอร์
     lastBudgetList = null;
     lastRequestParent = null;
     navStack = [];
@@ -7179,6 +7428,10 @@
       window.RemoteApi.signOut();
       accountsReady = false;
       USERS = [];
+      clearTimeout(sync.timer); clearTimeout(sync.retryTimer);
+      sync.docs = new Map(); sync.since = null; sync.inflight = false; sync.again = false;
+      db = emptyDb(); // ไม่ทิ้งข้อมูลของผู้ใช้เดิมไว้ในหน่วยความจำ
+      syncStatus('idle');
     } else authLog(me(), 'ออกจากระบบ', '');
     currentUserId = '';
     navStack = [];
@@ -7331,8 +7584,8 @@
   let userMenuReady = false;
 
   function init() {
-    if (!REMOTE) db = load();
-    if (AUTH_REMOTE) { const note = document.querySelector('.sidebar-note'); if (note) note.textContent = 'ล็อกอินและบัญชีผู้ใช้อยู่บนเซิร์ฟเวอร์ · ข้อมูลงบเป็นข้อมูลทดลอง เก็บในเบราว์เซอร์นี้เท่านั้น'; }
+    if (AUTH_REMOTE) db = emptyDb(); else if (!REMOTE) db = load(); // โหมด Supabase: ข้อมูลโหลดจากเซิร์ฟเวอร์หลังล็อกอิน (ไม่ใช้ localStorage)
+    if (AUTH_REMOTE) { const note = document.querySelector('.sidebar-note'); if (note) note.textContent = 'ข้อมูลเก็บบนเซิร์ฟเวอร์ — ทุกคนเห็นข้อมูลเดียวกันตามสิทธิ์และบริษัทของตน · ตอนนี้เป็นช่วงทดสอบ'; }
     checkForUpdate();
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') checkForUpdate();
