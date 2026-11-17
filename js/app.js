@@ -771,6 +771,49 @@
   }
 
   // ---- โหมด Supabase (เฟส 1): บัญชีและบทบาทอยู่บนเซิร์ฟเวอร์ ----------------------------------------
+  // ---- ข้อมูลหลักบนเซิร์ฟเวอร์ (เฟส 2): โหมด Supabase เก็บกลาง ทุกคนเห็นชุดเดียวกัน · key = รายการใน MASTER_NAV
+  let masterMeta = {};            // key → updatedAt ล่าสุดจากเซิร์ฟเวอร์ (ใช้กันบันทึกทับกัน) · null = เซิร์ฟเวอร์ยังไม่มีรายการนี้
+  let masterOnline = false;       // โหลดจากเซิร์ฟเวอร์สำเร็จหรือยัง (false = ใช้ค่าในเครื่อง ยังไม่ได้รันสคริปต์ล่าสุด หรือออฟไลน์)
+  let masterError = '';
+  /**
+   * โหลดข้อมูลหลักจากเซิร์ฟเวอร์มาแทนค่าในเครื่อง · รายการที่เซิร์ฟเวอร์ยังไม่มี = ใช้ค่าตั้งต้น และถ้าเป็นผู้จัดการข้อมูลหลัก
+   * จะบันทึกค่าปัจจุบันขึ้นไปเป็นต้นฉบับ (ครั้งเดียว) · คืน true ถ้าข้อมูลที่แสดงเปลี่ยน · ข้อผิดพลาดอื่นนอกจากหมดเวลาล็อกอินไม่ทำให้ระบบหยุด
+   */
+  async function loadRemoteMaster() {
+    if (!AUTH_REMOTE) return false;
+    const before = JSON.stringify(db.master);
+    let g;
+    try {
+      g = await window.RemoteApi.v2MasterGet();
+    } catch (e) {
+      if (e && e.code === 'AUTH') throw e;
+      masterOnline = false;
+      masterError = (e && e.message) || 'โหลดข้อมูลหลักจากเซิร์ฟเวอร์ไม่ได้';
+      return false;
+    }
+    masterOnline = true;
+    masterError = '';
+    g = g || {};
+    MASTER_NAV.forEach(([k]) => {
+      if (g[k] && Array.isArray(g[k].items)) { db.master[k] = g[k].items; masterMeta[k] = g[k].updatedAt || null; } else masterMeta[k] = null;
+    });
+    db = ensureMaster(db);
+    if (can('master.manage')) {
+      for (const [k] of MASTER_NAV) {
+        if (masterMeta[k] !== null) continue;
+        try {
+          const r = await window.RemoteApi.v2MasterSave(k, db.master[k], null);
+          masterMeta[k] = r.updatedAt;
+        } catch (e) {
+          if (e && e.code === 'AUTH') throw e;
+          console.warn('บันทึกข้อมูลหลักตั้งต้นขึ้นเซิร์ฟเวอร์ไม่สำเร็จ', k, e && e.message);
+        }
+      }
+    }
+    save();
+    return JSON.stringify(db.master) !== before;
+  }
+
   let accountsReady = false; // โหมด Supabase: โหลดบัญชี/บทบาทของผู้ใช้ที่ล็อกอินแล้ว
   const remoteRoleSys = {};  // roleKey → true ถ้าเป็นบทบาทตั้งต้นของระบบ (ลบไม่ได้)
   const profileToUser = (p) => Object.assign({}, p, {
@@ -3825,6 +3868,12 @@
     if (!name) return;
     db.master.suppliers = db.master.suppliers || [];
     if (!db.master.suppliers.some((x) => x.name === name)) db.master.suppliers.push({ name });
+    // โหมด Supabase: เพิ่มเข้าข้อมูลหลักกลางด้วย (ทุกคนเลือกชื่อนี้ได้) — เบื้องหลัง ไม่ขวางการส่งคำขอ
+    if (AUTH_REMOTE) {
+      window.RemoteApi.v2MasterAddSupplier(name).then((r) => {
+        if (r && Array.isArray(r.items)) { db.master.suppliers = r.items; masterMeta.suppliers = r.updatedAt; save(); }
+      }).catch((e) => console.warn('เพิ่ม Supplier เข้าข้อมูลหลักบนเซิร์ฟเวอร์ไม่สำเร็จ', e && e.message));
+    }
   };
 
   /** ตัวเลือกรายการ (เฉพาะรายการล่างสุด) พร้อมยอดคงเหลือ ไม่นับยอดที่คำขอนี้จองไว้เอง */
@@ -5478,6 +5527,9 @@
       '<div class="actions"><button type="button" class="btn" data-m-add>+ เพิ่ม</button><button class="btn primary" type="submit">บันทึก' + sec.title + '</button></div></form></section>').join('');
 
     return '<div class="page-head"><div><h1>' + esc(navTitle) + '</h1><div class="page-sub">ข้อมูลหลัก — ค่าที่ใช้เป็นตัวเลือกในฟอร์มและรายงาน</div></div></div>' + takeFlash() +
+      (AUTH_REMOTE ? (masterOnline
+        ? '<div class="alert info small">ข้อมูลหลักเก็บบนเซิร์ฟเวอร์ — ทุกคนเห็นชุดเดียวกับที่บันทึกที่นี่ · การเช็กว่า "ลบได้ไหม" และการเปลี่ยนชื่อ ครอบคลุมเฉพาะงบที่เก็บในเครื่องนี้ (งบยังเก็บในเบราว์เซอร์ของแต่ละคนจนกว่าจะย้ายขึ้นเซิร์ฟเวอร์)</div>'
+        : '<div class="alert error small">เชื่อมข้อมูลหลักกับเซิร์ฟเวอร์ไม่ได้ — ' + esc(masterError || 'ยังไม่ได้โหลด') + ' · บันทึกไม่ได้จนกว่าจะเชื่อมต่อได้ (ถ้าเพิ่งอัปเดตระบบ ให้รัน supabase/schema_v2.sql ใน SQL Editor แล้วโหลดหน้าใหม่)</div>') : '') +
       '<div id="formError"></div><div class="form-main">' + sections +
       '</div>';
   }
@@ -5540,6 +5592,27 @@
         if (REMOTE) {
           const renames = sec.rename ? rows.filter((it) => it.orig && it.orig !== it[keyCol]).map((it) => ({ from: it.orig, to: it[keyCol] })) : [];
           if (!(await runAndReload(() => window.RemoteApi.saveMaster(sec.key, data, renames)))) return;
+        } else if (AUTH_REMOTE) {
+          // โหมด Supabase: บันทึกที่เซิร์ฟเวอร์ก่อน สำเร็จแล้วค่อยแก้ชื่อที่งบในเครื่อง
+          if (!masterOnline && !(await loadRemoteMaster().then(() => masterOnline, () => false))) { showErrors(['เชื่อมข้อมูลหลักกับเซิร์ฟเวอร์ไม่ได้ — ' + (masterError || 'ลองใหม่อีกครั้ง')]); return; }
+          let res = null;
+          document.body.classList.add('busy');
+          try {
+            res = { value: await window.RemoteApi.v2MasterSave(sec.key, data, masterMeta[sec.key] || null) };
+          } catch (ex) {
+            if (ex && ex.code === 'AUTH') { showLoginDemo('login', { error: ex.message }); return; }
+            // เช่น มีคนอื่นแก้ไปก่อน: โหลดค่าล่าสุดมาแสดง แล้วบอกให้แก้อีกครั้ง
+            await loadRemoteMaster().catch(() => false);
+            setFlash('error', (ex && ex.message) || 'บันทึกข้อมูลหลักไม่สำเร็จ');
+            go('#/master/' + sec.key);
+            return;
+          } finally {
+            document.body.classList.remove('busy');
+          }
+          if (sec.rename) rows.forEach((it) => { if (it.orig && it.orig !== it[keyCol]) sec.rename(it.orig, it[keyCol]); });
+          db.master[sec.key] = res.value.items;
+          masterMeta[sec.key] = res.value.updatedAt;
+          save();
         } else {
           if (sec.rename) rows.forEach((it) => { if (it.orig && it.orig !== it[keyCol]) sec.rename(it.orig, it[keyCol]); });
           db.master[sec.key] = data;
@@ -7091,6 +7164,7 @@
         USERS = [profileToUser(meRow)];
         await loadRemoteRoles();
         await refreshAccounts();
+        await loadRemoteMaster();
       }
     } catch (e) {
       if (e && e.code === 'AUTH') { showLoginDemo('login', { error: e.message }); return; }
@@ -7289,6 +7363,17 @@
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') checkForUpdate();
     });
+    // โหมด Supabase: กลับมาที่แท็บแล้วโหลดข้อมูลหลักล่าสุด (คนอื่นอาจแก้ไว้) — ถ้าเปลี่ยนและไม่ได้กรอกฟอร์มอยู่ ให้วาดหน้าใหม่
+    if (AUTH_REMOTE) {
+      document.addEventListener('visibilitychange', async () => {
+        if (document.visibilityState !== 'visible' || !accountsReady || !window.RemoteApi.hasSession()) return;
+        let changed = false;
+        try { changed = await loadRemoteMaster(); } catch (e) { return; }
+        const ae = document.activeElement;
+        const typing = ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && document.getElementById('app').contains(ae);
+        if (changed && !typing && !isFormHash(location.hash || '')) { const y = window.scrollY; render(); window.scrollTo(0, y); }
+      });
+    }
     if (REMOTE) {
       document.body.classList.add('remote');
       const note = document.querySelector('.sidebar-note');

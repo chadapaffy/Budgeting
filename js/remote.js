@@ -164,6 +164,10 @@
     v2ListRoles: () => rpc('v2_list_roles'),
     v2SaveRole: (r) => rpc('v2_save_role', { p_key: r.key, p_name: r.name, p_description: r.description || '', p_permissions: r.permissions || [] }),
     v2DeleteRole: (key) => rpc('v2_delete_role', { p_key: key }),
+    // ---- ข้อมูลหลักบนเซิร์ฟเวอร์ (เฟส 2)
+    v2MasterGet: () => rpc('v2_master_get'),
+    v2MasterSave: (key, items, expectedUpdatedAt) => rpc('v2_master_save', { p_key: key, p_items: items, p_expected: expectedUpdatedAt || null }),
+    v2MasterAddSupplier: (name) => rpc('v2_master_add_supplier', { p_name: name }),
     adminUsers: (body) => invoke('v2-admin-users', body),
     me: () => rpc('app_me'),
     load: () => rpc('app_load'),

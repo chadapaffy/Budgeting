@@ -12,3 +12,9 @@ PGDATABASE=sp node run.js      # ตั้ง PGHOST / PGPORT / PGUSER ตาม
 ```
 
 อย่ารัน `shim.sql` กับโปรเจกต์ Supabase จริง (ใช้เฉพาะตอนทดสอบในเครื่อง)
+
+## ทดสอบระบบรอบใหม่ (`schema_v2.sql`)
+- `v2_test.sql` — ฐานข้อมูลล้วน: บัญชี บทบาทสิทธิ์ เปิดใช้ครั้งแรก และ **ข้อมูลหลัก (เฟส 2)** ครอบคลุมสิทธิ์ การตรวจรูปแบบ กันบันทึกทับกัน ประวัติ เพิ่ม Supplier
+  `psql -v ON_ERROR_STOP=1 -d sp -f shim.sql -f ../schema_v2.sql -f v2_test.sql`
+- `web_master.js` — หน้าเว็บจริง (Playwright) ↔ `fake-supabase.js` ↔ Postgres จริง: Admin เข้าระบบบันทึกค่าตั้งต้น · แก้ข้อมูลหลัก · ผู้ใช้อื่นเห็น · แก้ทับกันถูกปฏิเสธ · เซิร์ฟเวอร์ใช้ไม่ได้ก็ยังเปิดระบบได้แต่บันทึกไม่ได้
+  `PGDATABASE=sp node web_master.js` (ต้องรัน `npm install` ในโฟลเดอร์นี้ และมี Playwright)
