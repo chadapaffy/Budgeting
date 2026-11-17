@@ -1172,3 +1172,5 @@ button.link { color: var(--brand); }
 @media (max-width: 720px) { .item-group .item-table, .groups-box .item-table { min-width: 420px; } }
 .type-pick.wide { flex-basis: 440px; }
 .stepper.stepper-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.import-company { grid-template-columns: minmax(0, 360px); margin-top: var(--s-3); }
+.file-btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
