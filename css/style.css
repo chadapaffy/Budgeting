@@ -1174,3 +1174,12 @@ button.link { color: var(--brand); }
 .stepper.stepper-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .import-company { grid-template-columns: minmax(0, 360px); margin-top: var(--s-3); }
 .file-btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+
+/* ---- เข้าสู่ระบบ / บัญชีของฉัน (โหมดทดลอง) ---- */
+.auth-links { margin-top: var(--s-4); gap: var(--s-2); flex-wrap: wrap; }
+.auth-card form .btn + .btn, .auth-card .auth-links .btn { width: auto; margin-top: 0; }
+.auth-demo { margin-top: var(--s-5); padding-top: var(--s-4); border-top: 1px solid var(--line); font-size: var(--fs-sm); color: var(--ink-soft); }
+.auth-demo summary { cursor: pointer; }
+.auth-demo-list { display: flex; flex-direction: column; gap: var(--s-2); margin-top: var(--s-3); }
+.auth-demo-list .btn { justify-content: flex-start; text-align: left; }
+.form-narrow { max-width: 420px; }

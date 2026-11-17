@@ -24,14 +24,17 @@
   // (เวอร์ชันที่เชื่อม Supabase ได้แล้วเก็บไว้ที่ /v1/)
   const REMOTE = false;
 
+  /** บัญชีตัวอย่าง (โหมดทดลอง): อีเมลสมมติทั้งหมด — ผู้ใช้จริงให้ Admin เพิ่มอีเมลเอง ส่วนรหัสผ่านผู้ใช้ตั้งเอง */
   const DEMO_USERS = [
-    { id: 'req1', name: 'สมชาย ใจดี', title: 'วิศวกร ฝ่ายวิศวกรรม', role: 'business' },
-    { id: 'req2', name: 'สุดา รักงาน', title: 'เจ้าหน้าที่โครงการ ฝ่ายโครงการ', role: 'business' },
-    { id: 'fin1', name: 'มาลี เงินดี', title: 'บัญชีการเงิน', role: 'controller' },
-    { id: 'pur1', name: 'ปิติ จัดหา', title: 'เจ้าหน้าที่จัดซื้อ', role: 'purchasing' },
-    { id: 'adm1', name: 'อดิศร ดูแลระบบ', title: 'ผู้ดูแลระบบ (IT)', role: 'admin' }
+    { id: 'req1', email: 'somchai@demo.test', name: 'สมชาย ใจดี', title: 'วิศวกร', department: 'ฝ่ายวิศวกรรม', company: 'PBI', role: 'business' },
+    { id: 'req2', email: 'suda@demo.test', name: 'สุดา รักงาน', title: 'เจ้าหน้าที่โครงการ', department: 'ฝ่ายโครงการ', company: 'PBI', role: 'business' },
+    { id: 'fin1', email: 'mali@demo.test', name: 'มาลี เงินดี', title: 'บัญชีการเงิน', department: 'ฝ่ายบัญชีการเงิน', company: 'PBI', role: 'controller' },
+    { id: 'pur1', email: 'piti@demo.test', name: 'ปิติ จัดหา', title: 'เจ้าหน้าที่จัดซื้อ', department: 'ฝ่ายจัดซื้อ', company: 'PBI', role: 'purchasing' },
+    { id: 'adm1', email: 'adisorn@demo.test', name: 'อดิศร ดูแลระบบ', title: 'ผู้ดูแลระบบ (IT)', department: 'ฝ่าย IT', company: 'PBI', role: 'admin' }
   ];
-  let USERS = DEMO_USERS; // โหมด Supabase: แทนที่ด้วยรายชื่อผู้ใช้จากฐานข้อมูล
+  /** เปิดปุ่ม "เข้าด้วยบัญชีตัวอย่าง" ในหน้าล็อกอิน (โหมดทดลองเท่านั้น — ข้ามรหัสผ่านเพื่อทดสอบบทบาทต่างๆ) ปิดเมื่อใช้งานจริง */
+  const DEMO_QUICK_LOGIN = true;
+  let USERS = DEMO_USERS.map((x) => Object.assign({ active: true, mustSetPassword: true, pwHash: '', pwSalt: '' }, x)); // โหมด Supabase: แทนที่ด้วยรายชื่อผู้ใช้จากฐานข้อมูล
   let remoteMe = null; // โหมด Supabase: ผู้ใช้ที่ล็อกอินอยู่ (null = ยังไม่ได้ล็อกอิน)
 
   const ROLE_LABEL = {
@@ -579,8 +582,197 @@
   }
 
   let db;
-  let currentUserId = 'fin1';
-  try { currentUserId = localStorage.getItem(DB_KEY + '.user') || currentUserId; } catch (e) { /* ignore */ }
+  /** ผู้ใช้ที่ล็อกอินอยู่ ('' = ยังไม่ได้ล็อกอิน) — โหมดทดลองเก็บ id ไว้ในเบราว์เซอร์ */
+  let currentUserId = '';
+  try { currentUserId = localStorage.getItem(DB_KEY + '.user') || ''; } catch (e) { /* ignore */ }
+
+  // ================================================================ บัญชีผู้ใช้ + ล็อกอิน (โหมดทดลอง)
+  //
+  // ต้นแบบนี้ไม่มีเซิร์ฟเวอร์ จึงเก็บบัญชีในเบราว์เซอร์ (localStorage คีย์ procurement.v5.users) และเก็บรหัสผ่านเป็น hash (PBKDF2-SHA256 + salt)
+  // **ไม่ปลอดภัยจริง** (ใครแก้ localStorage ได้ก็ข้ามได้) — ใช้ทดสอบขั้นตอนเท่านั้น ระบบจริงเปลี่ยนไปใช้ Supabase Auth (js/remote.js) โดยคงขั้นตอนเดิม:
+  //   1) Admin เพิ่มอีเมลพร้อมข้อมูลบัญชี (สถานะ "รอตั้งรหัสผ่าน")  2) ผู้ใช้ตั้งรหัสผ่านเองครั้งแรก  3) ลืมรหัสผ่าน → แจ้ง Admin รีเซ็ต → ผู้ใช้ตั้งรหัสผ่านใหม่
+  //
+  // บัญชี: { id, email, name, title(ตำแหน่ง), department(หน่วยงาน), company(บริษัท), role, active, mustSetPassword, pwHash, pwSalt,
+  //          createdAt, createdBy, lastLoginAt, passwordChangedAt, resetRequestedAt, resetAt, resetBy, failCount, lockedUntil }
+  const USERS_KEY = DB_KEY + '.users';
+  const PW_MIN = 8;
+  const PW_ITER = 100000;
+  const LOCK_AFTER = 5; // ใส่รหัสผิดติดกันกี่ครั้งจึงพักการล็อกอิน
+  const LOCK_MS = 30000;
+  const normEmail = (e) => String(e || '').trim().toLowerCase();
+  const validEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+  function loadUsers() {
+    let list = null;
+    try { list = JSON.parse(localStorage.getItem(USERS_KEY) || 'null'); } catch (e) { list = null; }
+    if (!Array.isArray(list) || !list.length) {
+      list = DEMO_USERS.map((x) => Object.assign({ active: true, mustSetPassword: true, pwHash: '', pwSalt: '', createdAt: '' }, x));
+    }
+    return list;
+  }
+  function saveUsers() {
+    try { localStorage.setItem(USERS_KEY, JSON.stringify(USERS)); return true; } catch (e) { alert('บันทึกบัญชีผู้ใช้ไม่สำเร็จ (พื้นที่เบราว์เซอร์เต็ม)'); return false; }
+  }
+  if (!REMOTE) USERS = loadUsers();
+  const accountByEmail = (e) => USERS.find((u) => normEmail(u.email) === normEmail(e));
+  const b64 = (buf) => btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(buf))));
+  const unb64 = (t) => Uint8Array.from(atob(t), (c) => c.charCodeAt(0));
+  async function hashPassword(password, saltB64) {
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+    return b64(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: unb64(saltB64), iterations: PW_ITER, hash: 'SHA-256' }, key, 256));
+  }
+  const newSalt = () => b64(crypto.getRandomValues(new Uint8Array(16)));
+  /** เงื่อนไขรหัสผ่าน: อย่างน้อย 8 ตัว มีทั้งตัวอักษรและตัวเลข และไม่ซ้ำกับอีเมล — คืนข้อความผิดพลาด หรือ '' ถ้าผ่าน */
+  function passwordProblem(pw, email) {
+    if (String(pw).length < PW_MIN) return 'รหัสผ่านต้องยาวอย่างน้อย ' + PW_MIN + ' ตัวอักษร';
+    if (!/[A-Za-z\u0E00-\u0E7F]/.test(pw) || !/\d/.test(pw)) return 'รหัสผ่านต้องมีทั้งตัวอักษรและตัวเลข';
+    if (email && normEmail(pw) === normEmail(email)) return 'รหัสผ่านต้องไม่ซ้ำกับอีเมล';
+    return '';
+  }
+  const authLog = (u, action, detail) => {
+    // ล็อกอิน/ตั้งรหัสผ่านเกิดก่อนมีผู้ใช้ปัจจุบัน — บันทึกในข้อมูลหลักด้วย id ของบัญชีนั้น
+    try {
+      const d = db || load();
+      d.log = d.log || [];
+      d.log.push({ at: new Date().toISOString(), by: u ? u.id : '', action, ref: u ? u.email : '', detail: detail || '' });
+      localStorage.setItem(DB_KEY, JSON.stringify(d));
+    } catch (e) { /* ignore */ }
+  };
+
+  /** ล็อกอินด้วยอีเมล + รหัสผ่าน → { user } หรือ { error: 'invalid' | 'locked' | 'inactive' | 'needs_password', message } */
+  async function authLogin(email, password) {
+    const u = accountByEmail(email);
+    const bad = { error: 'invalid', message: 'อีเมลหรือรหัสผ่านไม่ถูกต้อง' };
+    if (!u) return bad;
+    if (u.lockedUntil && Date.now() < u.lockedUntil) return { error: 'locked', message: 'ใส่รหัสผ่านผิดหลายครั้ง กรุณารอสักครู่แล้วลองใหม่' };
+    if (u.active === false) return { error: 'inactive', message: 'บัญชีนี้ถูกปิดการใช้งาน กรุณาติดต่อผู้ดูแลระบบ' };
+    if (u.mustSetPassword || !u.pwHash) return { error: 'needs_password', message: 'บัญชีนี้ยังไม่ได้ตั้งรหัสผ่าน (หรือผู้ดูแลระบบรีเซ็ตให้แล้ว) — ตั้งรหัสผ่านใหม่ได้เลย' };
+    const h = await hashPassword(password, u.pwSalt);
+    if (h !== u.pwHash) {
+      u.failCount = (u.failCount || 0) + 1;
+      if (u.failCount >= LOCK_AFTER) { u.lockedUntil = Date.now() + LOCK_MS; u.failCount = 0; }
+      saveUsers();
+      return bad;
+    }
+    u.failCount = 0; u.lockedUntil = 0; u.lastLoginAt = new Date().toISOString();
+    saveUsers();
+    authLog(u, 'เข้าสู่ระบบ', '');
+    return { user: u };
+  }
+  /** ตั้งรหัสผ่านเอง (ครั้งแรก หรือหลัง Admin รีเซ็ต) — ทำได้เฉพาะบัญชีที่อยู่ในสถานะ "รอตั้งรหัสผ่าน" */
+  async function authSetPassword(email, password) {
+    const u = accountByEmail(email);
+    if (!u || u.active === false) return { error: 'invalid', message: 'ไม่พบอีเมลนี้ในระบบ — ให้ผู้ดูแลระบบเพิ่มอีเมลของคุณก่อน' };
+    if (!u.mustSetPassword && u.pwHash) return { error: 'has_password', message: 'บัญชีนี้ตั้งรหัสผ่านแล้ว — ถ้าลืมรหัสผ่าน ให้แจ้งผู้ดูแลระบบรีเซ็ตให้ก่อน' };
+    const problem = passwordProblem(password, email);
+    if (problem) return { error: 'weak', message: problem };
+    u.pwSalt = newSalt();
+    u.pwHash = await hashPassword(password, u.pwSalt);
+    Object.assign(u, { mustSetPassword: false, passwordChangedAt: new Date().toISOString(), resetRequestedAt: '', failCount: 0, lockedUntil: 0, lastLoginAt: new Date().toISOString() });
+    saveUsers();
+    authLog(u, 'ตั้งรหัสผ่าน', '');
+    return { user: u };
+  }
+  /** เปลี่ยนรหัสผ่านของตัวเอง (ต้องใส่รหัสผ่านเดิม) */
+  async function authChangePassword(u, current, next) {
+    if (await hashPassword(current, u.pwSalt) !== u.pwHash) return { error: 'invalid', message: 'รหัสผ่านเดิมไม่ถูกต้อง' };
+    const problem = passwordProblem(next, u.email);
+    if (problem) return { error: 'weak', message: problem };
+    if (next === current) return { error: 'same', message: 'รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านเดิม' };
+    u.pwSalt = newSalt();
+    u.pwHash = await hashPassword(next, u.pwSalt);
+    u.passwordChangedAt = new Date().toISOString();
+    saveUsers();
+    authLog(u, 'เปลี่ยนรหัสผ่าน', '');
+    return { user: u };
+  }
+  /** ลืมรหัสผ่าน: ผู้ใช้แจ้งขอให้ Admin รีเซ็ต (ทำเครื่องหมายบนบัญชี — ตอบเหมือนกันไม่ว่ามีอีเมลนี้หรือไม่) */
+  function authRequestReset(email) {
+    const u = accountByEmail(email);
+    if (u && u.active !== false) {
+      u.resetRequestedAt = new Date().toISOString();
+      saveUsers();
+      authLog(u, 'ขอรีเซ็ตรหัสผ่าน', '');
+    }
+    return true;
+  }
+
+  // ---- ฟังก์ชันสำหรับหน้า Admin (ต้องมีสิทธิ์ user.manage) ----------------------------------
+  const requireUserManage = () => { if (!can('user.manage')) throw new Error('ไม่มีสิทธิ์จัดการผู้ใช้'); };
+  const nextUserId = () => { let n = USERS.length + 1; while (USERS.some((u) => u.id === 'u' + n)) n += 1; return 'u' + n; };
+  const accountClean = (f) => ({
+    email: normEmail(f.email), name: String(f.name || '').trim(), title: String(f.title || '').trim(),
+    department: String(f.department || '').trim(), company: String(f.company || '').trim(), role: String(f.role || '').trim()
+  });
+  function accountProblem(a, ignoreId) {
+    if (!validEmail(a.email)) return 'รูปแบบอีเมลไม่ถูกต้อง';
+    if (USERS.some((u) => u.id !== ignoreId && normEmail(u.email) === a.email)) return 'อีเมลนี้มีอยู่ในระบบแล้ว';
+    if (!a.name) return 'กรุณาระบุชื่อ';
+    if (!a.role) return 'กรุณาเลือกบทบาท';
+    return '';
+  }
+  /** เพิ่มบัญชี: Admin ใส่อีเมล + ข้อมูลบัญชี — ผู้ใช้ตั้งรหัสผ่านเอง (สถานะเริ่มต้น "รอตั้งรหัสผ่าน") */
+  function accountCreate(f) {
+    requireUserManage();
+    const a = accountClean(f);
+    const problem = accountProblem(a, '');
+    if (problem) throw new Error(problem);
+    const u = Object.assign({ id: nextUserId(), active: true, mustSetPassword: true, pwHash: '', pwSalt: '', createdAt: new Date().toISOString(), createdBy: me().id }, a);
+    USERS.push(u);
+    saveUsers();
+    logAction('เพิ่มบัญชีผู้ใช้', u.email, u.name + ' · ' + roleLabel(u));
+    save();
+    return u;
+  }
+  /** แก้ข้อมูลบัญชี (อีเมล ชื่อ ตำแหน่ง หน่วยงาน บริษัท บทบาท) */
+  function accountUpdate(id, f) {
+    requireUserManage();
+    const u = user(id);
+    if (!u) throw new Error('ไม่พบบัญชี');
+    const a = accountClean(Object.assign({}, u, f));
+    const problem = accountProblem(a, id);
+    if (problem) throw new Error(problem);
+    Object.assign(u, a);
+    saveUsers();
+    logAction('แก้ไขบัญชีผู้ใช้', u.email, u.name);
+    save();
+    return u;
+  }
+  /** เปิด / ปิดการใช้งานบัญชี (ปิดแล้วล็อกอินไม่ได้ และถูกออกจากระบบทันที) — ปิดบัญชีตัวเองไม่ได้ */
+  function accountSetActive(id, active) {
+    requireUserManage();
+    const u = user(id);
+    if (!u) throw new Error('ไม่พบบัญชี');
+    if (id === me().id && !active) throw new Error('ปิดบัญชีของตัวเองไม่ได้');
+    u.active = !!active;
+    saveUsers();
+    logAction(active ? 'เปิดใช้งานบัญชี' : 'ปิดการใช้งานบัญชี', u.email, u.name);
+    save();
+    return u;
+  }
+  /** รีเซ็ตรหัสผ่าน: ล้างรหัสผ่านเดิม → ผู้ใช้เข้าหน้า "ตั้งรหัสผ่าน" แล้วกรอกอีเมลเพื่อตั้งรหัสผ่านใหม่เอง (Admin ไม่เห็น / ไม่ตั้งรหัสผ่านให้) */
+  function accountResetPassword(id) {
+    requireUserManage();
+    const u = user(id);
+    if (!u) throw new Error('ไม่พบบัญชี');
+    Object.assign(u, { pwHash: '', pwSalt: '', mustSetPassword: true, resetAt: new Date().toISOString(), resetBy: me().id, resetRequestedAt: '', failCount: 0, lockedUntil: 0 });
+    saveUsers();
+    logAction('รีเซ็ตรหัสผ่าน', u.email, u.name);
+    save();
+    return u;
+  }
+  /** สถานะบัญชีสำหรับแสดงผล */
+  function accountState(u) {
+    if (u.active === false) return { key: 'inactive', label: 'ปิดการใช้งาน' };
+    if (u.mustSetPassword || !u.pwHash) return { key: 'pending', label: u.resetAt && !u.passwordChangedAt ? 'รอตั้งรหัสผ่านใหม่ (รีเซ็ตแล้ว)' : u.resetAt && u.resetAt > (u.passwordChangedAt || '') ? 'รอตั้งรหัสผ่านใหม่ (รีเซ็ตแล้ว)' : 'รอตั้งรหัสผ่าน' };
+    if (u.resetRequestedAt) return { key: 'reset_requested', label: 'ขอรีเซ็ตรหัสผ่าน' };
+    return { key: 'ok', label: 'ใช้งานได้' };
+  }
+  /** รายชื่อสำหรับเลือก / แท็กงานถึงคน: ผู้ใช้ที่เปิดใช้งาน พร้อมตำแหน่ง หน่วยงาน บริษัท (filter: ฟังก์ชันกรองเพิ่มได้) */
+  const activeUsers = (filter) => USERS.filter((u) => u.active !== false && (!filter || filter(u)));
+  const userLabel = (u) => (u ? u.name + (u.title ? ' — ' + u.title : '') + (u.department || u.company ? ' · ' + [u.department, u.company].filter(Boolean).join(' / ') : '') : '-');
+  const userOptions = (selectedId, filter) => '<option value="">— เลือก —</option>' + activeUsers(filter).map((u) => '<option value="' + esc(u.id) + '"' + (u.id === selectedId ? ' selected' : '') + '>' + esc(userLabel(u)) + '</option>').join('');
+  // เปิดให้หน้า Admin / ชุดทดสอบเรียกใช้ (ทุกฟังก์ชันตรวจสิทธิ์ user.manage เอง)
+  window.AppAccounts = { list: () => USERS.slice(), create: accountCreate, update: accountUpdate, setActive: accountSetActive, resetPassword: accountResetPassword, state: accountState };
 
   function save() {
     if (REMOTE) { console.error('save() ถูกเรียกในโหมด Supabase — ข้อมูลต้องบันทึกผ่านเซิร์ฟเวอร์'); return; }
@@ -5937,8 +6129,8 @@
 
   function viewAdminDemo() {
     const roles = Object.keys(DEMO_ROLE_PERMS);
-    const users = '<div class="table-wrap"><table><thead><tr><th>ชื่อ</th><th>ตำแหน่ง</th><th>บทบาท</th></tr></thead><tbody>' +
-      USERS.map((x) => '<tr><td>' + esc(x.name) + '</td><td>' + esc(x.title) + '</td><td>' + esc(roleLabel(x)) + '</td></tr>').join('') + '</tbody></table></div>';
+    const users = '<div class="table-wrap"><table><thead><tr><th>ชื่อ</th><th>อีเมล</th><th>ตำแหน่ง</th><th>หน่วยงาน</th><th>บริษัท</th><th>บทบาท</th><th>สถานะ</th></tr></thead><tbody>' +
+      USERS.map((x) => '<tr><td>' + esc(x.name) + '</td><td>' + esc(x.email) + '</td><td>' + esc(x.title) + '</td><td>' + esc(x.department) + '</td><td>' + esc(x.company) + '</td><td>' + esc(roleLabel(x)) + '</td><td>' + esc(accountState(x).label) + '</td></tr>').join('') + '</tbody></table></div>';
     let group = '';
     const matrix = '<div class="table-wrap"><table class="perm-matrix"><thead><tr><th>สิทธิ์</th>' + roles.map((r) => '<th class="center">' + esc(ROLE_LABEL[r]) + '</th>').join('') + '</tr></thead><tbody>' +
       PERMISSIONS.map((pm) => {
@@ -6340,6 +6532,13 @@
 
   function render() {
     if (REMOTE && !remoteMe) return; // ยังไม่ได้ล็อกอิน
+    if (!REMOTE) {
+      // โหมดทดลอง: ต้องล็อกอินก่อน (บัญชีที่ถูกปิดการใช้งานจะถูกออกจากระบบทันที)
+      const cur = user(currentUserId);
+      if (!cur || cur.active === false) { showLoginDemo('login'); return; }
+      document.body.classList.remove('auth-screen');
+      initUserMenu();
+    }
     const hash = location.hash || homeFor(me());
     const [path, query] = hash.slice(1).split('?');
     const params = new URLSearchParams(query || '');
@@ -6351,6 +6550,7 @@
     if (parts[0] === 'dashboard') html = viewDashboard(params);
     else if (parts[0] === 'master') html = viewMaster(parts[1]);
     else if (parts[0] === 'admin') html = viewAdmin(params);
+    else if (parts[0] === 'account') html = viewAccount();
     else if (parts[0] === 'budgets' || parts[0] === 'my-budgets') html = viewBudgets(params, parts[0] === 'my-budgets');
     else if (parts[0] === 'budget' && parts[1] === 'new') html = viewBudgetForm(null, params);
     else if (parts[0] === 'budget' && parts[1] === 'import') html = viewImport();
@@ -6410,6 +6610,7 @@
     bindDashboard();
     bindMaster();
     bindAdmin();
+    bindAccount();
     bindRequestForm();
     bindCuts();
     bindRequestDetail();
@@ -6440,10 +6641,10 @@
 
   function renderUserButton() {
     document.getElementById('userName').textContent = me().name;
-    document.getElementById('userPos').textContent = me().title;
+    document.getElementById('userPos').textContent = [me().title, me().department].filter(Boolean).join(' · ');
   }
 
-  /** เมนูผู้ใช้มุมขวาบน: สลับผู้ใช้ตัวอย่าง (ต้นแบบยังไม่มีล็อกอิน) และรีเซ็ตข้อมูล */
+  /** เมนูผู้ใช้มุมขวาบน: บัญชีของฉัน / ออกจากระบบ (โหมดทดลองมีเครื่องมือล้างข้อมูลทดสอบเพิ่ม) */
   function initUserMenu() {
     if (userMenuReady) { renderUserButton(); return; }
     userMenuReady = true;
@@ -6451,17 +6652,12 @@
     const menu = document.getElementById('userMenu');
     const close = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
     const fill = () => {
-      if (REMOTE) {
-        menu.innerHTML = '<div class="menu-label">เข้าสู่ระบบในฐานะ</div><div class="menu-user"><strong>' + esc(me().name) + '</strong><small>' +
-          esc((me().title ? me().title + ' · ' : '') + roleLabel(me())) + '</small></div><hr>' +
-          '<button type="button" role="menuitem" data-logout>ออกจากระบบ</button>';
-        return;
-      }
-      menu.innerHTML = '<div class="menu-label">เข้าใช้งานในฐานะ (ทดสอบ)</div>' +
-        USERS.map((x) => '<button type="button" role="menuitemradio" data-user="' + x.id + '" aria-checked="' + (x.id === me().id) + '">' +
-          esc(x.name) + '<small>' + esc(x.title + ' · ' + roleLabel(x)) + '</small></button>').join('') +
-        '<hr><button type="button" role="menuitem" class="danger" data-clear-all>ล้างข้อมูลทั้งหมด (เริ่มทดสอบ)</button>' +
-        '<button type="button" role="menuitem" data-reset>โหลดข้อมูลตัวอย่าง</button>';
+      const who = '<div class="menu-label">เข้าสู่ระบบในฐานะ</div><div class="menu-user"><strong>' + esc(me().name) + '</strong><small>' +
+        esc([me().title, roleLabel(me())].filter(Boolean).join(' · ')) + '</small>' +
+        (me().email ? '<small>' + esc(me().email) + '</small>' : '') + '</div><hr>';
+      menu.innerHTML = who + (REMOTE ? '' : '<button type="button" role="menuitem" data-account>บัญชีของฉัน</button>') +
+        (REMOTE ? '' : '<button type="button" role="menuitem" class="danger" data-clear-all>ล้างข้อมูลทดสอบ (งบ คำขอ เอกสาร Log)</button><button type="button" role="menuitem" data-reset>โหลดข้อมูลตัวอย่าง</button><hr>') +
+        '<button type="button" role="menuitem" data-logout>ออกจากระบบ</button>';
     };
     renderUserButton();
     btn.addEventListener('click', (e) => {
@@ -6477,28 +6673,150 @@
       e.stopPropagation();
       close();
       if (item.hasAttribute('data-logout')) { logout(); return; }
+      if (item.hasAttribute('data-account')) { go('#/account'); return; }
       if (item.hasAttribute('data-clear-all')) {
-        if (!confirm('ล้างข้อมูลทั้งหมด (งบ คำขอ เอกสาร ไฟล์แนบ Log) เพื่อเริ่มทดสอบใหม่? — ข้อมูลหลักยังอยู่')) return;
+        if (!confirm('ล้างข้อมูลทดสอบ (งบ คำขอ เอกสาร ไฟล์แนบ Log) เพื่อเริ่มทดสอบใหม่? — ข้อมูลหลักและบัญชีผู้ใช้ยังอยู่')) return;
         db = emptyDb(db.master);
         navStack = [];
         save();
       } else if (item.hasAttribute('data-reset')) {
-        if (!confirm('แทนที่ข้อมูลทั้งหมดด้วยข้อมูลตัวอย่าง?')) return;
+        if (!confirm('แทนที่ข้อมูลงบทั้งหมดด้วยข้อมูลตัวอย่าง? — บัญชีผู้ใช้ยังอยู่')) return;
         db = seed();
         navStack = [];
         save();
-      } else {
-        currentUserId = item.dataset.user;
-        lastBudgetList = null;
-        lastRequestParent = null;
-        navStack = [];
-        try { localStorage.setItem(DB_KEY + '.user', currentUserId); } catch (err) { /* ignore */ }
-        renderUserButton();
       }
       go(homeFor(me()));
     });
     document.addEventListener('click', close);
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  }
+
+  // ---------------------------------------------------------------- เข้าสู่ระบบ (โหมดทดลอง: อีเมล + รหัสผ่านที่ผู้ใช้ตั้งเอง)
+
+  const authField = (label, name, type, extra) => '<label class="field"><span>' + label + '</span><input name="' + name + '" type="' + type + '" ' + (extra || '') + ' required></label>';
+  const authLinks = (items) => '<div class="actions auth-links">' + items.map((x) => '<button type="button" class="btn small" data-auth-mode="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
+
+  /** หน้าเข้าสู่ระบบโหมดทดลอง: mode = login | set (ตั้งรหัสผ่าน) | forgot (ลืมรหัสผ่าน) */
+  function showLoginDemo(mode, opts) {
+    opts = opts || {};
+    document.body.classList.add('auth-screen');
+    const notice = (opts.error ? '<div class="alert error" role="alert">' + esc(opts.error) + '</div>' : '') + (opts.info ? '<div class="alert info">' + esc(opts.info) + '</div>' : '');
+    const emailVal = opts.email ? ' value="' + esc(opts.email) + '"' : '';
+    let inner;
+    if (mode === 'set') {
+      inner = '<h1>ตั้งรหัสผ่าน</h1><p class="muted">ใช้ตั้งรหัสผ่านครั้งแรก หรือตั้งรหัสผ่านใหม่หลังผู้ดูแลระบบรีเซ็ตให้ — ใช้อีเมลที่ผู้ดูแลระบบเพิ่มไว้</p>' + notice +
+        '<form id="authForm" data-mode="set">' + authField('อีเมล', 'email', 'email', 'autocomplete="username"' + emailVal) +
+        authField('รหัสผ่านใหม่', 'password', 'password', 'autocomplete="new-password" minlength="' + PW_MIN + '"') +
+        authField('ยืนยันรหัสผ่านใหม่', 'confirm', 'password', 'autocomplete="new-password"') +
+        '<p class="muted small-note">อย่างน้อย ' + PW_MIN + ' ตัวอักษร มีทั้งตัวอักษรและตัวเลข</p>' +
+        '<button class="btn primary tall" type="submit">ตั้งรหัสผ่านและเข้าสู่ระบบ</button></form>' + authLinks([['login', 'กลับไปเข้าสู่ระบบ']]);
+    } else if (mode === 'forgot') {
+      inner = '<h1>ลืมรหัสผ่าน</h1><p class="muted">แจ้งผู้ดูแลระบบให้รีเซ็ตรหัสผ่านให้ เมื่อรีเซ็ตแล้วให้กลับมาตั้งรหัสผ่านใหม่ด้วยตัวเอง</p>' + notice +
+        (opts.sent ? '' : '<form id="authForm" data-mode="forgot">' + authField('อีเมลของคุณ', 'email', 'email', 'autocomplete="username"' + emailVal) +
+          '<button class="btn primary tall" type="submit">แจ้งผู้ดูแลระบบให้รีเซ็ต</button></form>') +
+        authLinks(opts.sent ? [['set', 'ตั้งรหัสผ่านใหม่'], ['login', 'กลับไปเข้าสู่ระบบ']] : [['login', 'กลับไปเข้าสู่ระบบ']]);
+    } else {
+      const quick = DEMO_QUICK_LOGIN ? '<details class="auth-demo"><summary>โหมดทดลอง: เข้าด้วยบัญชีตัวอย่าง (ข้ามรหัสผ่าน)</summary><div class="auth-demo-list">' +
+        activeUsers().map((x) => '<button type="button" class="btn small" data-quick="' + esc(x.id) + '">' + esc(x.name) + ' — ' + esc(roleLabel(x)) + '</button>').join('') + '</div></details>' : '';
+      inner = '<h1>เข้าสู่ระบบ</h1><p class="muted">ระบบขอเบิกใช้งบประมาณ</p>' + notice +
+        '<form id="authForm" data-mode="login">' + authField('อีเมล', 'email', 'email', 'autocomplete="username"' + emailVal) +
+        authField('รหัสผ่าน', 'password', 'password', 'autocomplete="current-password"') +
+        '<button class="btn primary tall" type="submit">เข้าสู่ระบบ</button></form>' +
+        authLinks([['set', 'ตั้งรหัสผ่าน (ครั้งแรก / หลังรีเซ็ต)'], ['forgot', 'ลืมรหัสผ่าน']]) +
+        '<p class="muted small-note">บัญชีผู้ใช้เพิ่มโดยผู้ดูแลระบบ — ถ้าไม่มีอีเมลในระบบ ให้แจ้งผู้ดูแลระบบ</p>' + quick;
+    }
+    authShell('<div class="card auth-card" id="authCard">' + inner + '</div>');
+    const card = document.getElementById('authCard');
+    card.querySelectorAll('[data-auth-mode]').forEach((b) => b.addEventListener('click', () => {
+      const f = document.getElementById('authForm');
+      showLoginDemo(b.dataset.authMode, { email: f ? f.elements.email.value.trim() : (opts.email || '') });
+    }));
+    card.querySelectorAll('[data-quick]').forEach((b) => b.addEventListener('click', () => enterDemo(user(b.dataset.quick), '')));
+    const form = document.getElementById('authForm');
+    if (form) {
+      const first = form.elements.email.value ? form.elements.password || form.elements.confirm : form.elements.email;
+      if (first) first.focus();
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = form.querySelector('button[type=submit]');
+        btn.disabled = true;
+        const email = form.elements.email.value.trim();
+        const m = form.dataset.mode;
+        try {
+          if (m === 'forgot') {
+            authRequestReset(email);
+            showLoginDemo('forgot', { sent: true, email, info: 'ส่งคำขอถึงผู้ดูแลระบบแล้ว — เมื่อผู้ดูแลระบบรีเซ็ตรหัสผ่านให้ ให้กด "ตั้งรหัสผ่านใหม่" แล้วกรอกอีเมลกับรหัสผ่านใหม่' });
+            return;
+          }
+          if (m === 'set') {
+            if (form.elements.password.value !== form.elements.confirm.value) { showLoginDemo('set', { email, error: 'รหัสผ่านทั้งสองช่องไม่ตรงกัน' }); return; }
+            const r = await authSetPassword(email, form.elements.password.value);
+            if (r.error) { showLoginDemo(r.error === 'has_password' ? 'login' : 'set', { email, error: r.message }); return; }
+            enterDemo(r.user, 'ตั้งรหัสผ่านเรียบร้อย ยินดีต้อนรับ');
+            return;
+          }
+          const r = await authLogin(email, form.elements.password.value);
+          if (r.error === 'needs_password') { showLoginDemo('set', { email, info: r.message }); return; }
+          if (r.error) { showLoginDemo('login', { email, error: r.message }); return; }
+          enterDemo(r.user, '');
+        } catch (err) {
+          showLoginDemo(m, { email, error: 'เกิดข้อผิดพลาด: ' + ((err && err.message) || err) });
+        }
+      });
+    }
+  }
+
+  function enterDemo(u, flashText) {
+    if (!u) return;
+    currentUserId = u.id;
+    lastBudgetList = null;
+    lastRequestParent = null;
+    navStack = [];
+    try { localStorage.setItem(DB_KEY + '.user', currentUserId); } catch (e) { /* ignore */ }
+    if (flashText) setFlash('success', flashText);
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
+    render();
+  }
+
+  function logoutDemo() {
+    authLog(me(), 'ออกจากระบบ', '');
+    currentUserId = '';
+    navStack = [];
+    try { localStorage.removeItem(DB_KEY + '.user'); } catch (e) { /* ignore */ }
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
+    showLoginDemo('login');
+  }
+
+  // ---------------------------------------------------------------- บัญชีของฉัน (โหมดทดลอง)
+
+  function viewAccount() {
+    const u = me();
+    const row = (k, v) => '<tr><th scope="row">' + k + '</th><td>' + (v ? esc(v) : '<span class="muted">-</span>') + '</td></tr>';
+    return '<div class="page-head"><div><h1>บัญชีของฉัน</h1><div class="page-sub">ข้อมูลบัญชีให้ผู้ดูแลระบบแก้ไข — เปลี่ยนรหัสผ่านได้เอง</div></div></div>' + takeFlash() +
+      '<section class="card form-section"><div class="section-head"><h2 class="section-title">ข้อมูลบัญชี</h2></div><div class="table-wrap"><table><tbody>' +
+      row('ชื่อ', u.name) + row('อีเมล', u.email) + row('ตำแหน่ง', u.title) + row('หน่วยงาน', u.department) + row('บริษัท', u.company) + row('บทบาท', roleLabel(u)) +
+      '</tbody></table></div></section>' +
+      (REMOTE ? '' : '<section class="card form-section"><div class="section-head"><h2 class="section-title">เปลี่ยนรหัสผ่าน</h2></div>' +
+        (u.pwHash ? '<form id="pwForm" class="form-narrow"><div id="pwMsg"></div>' +
+          authField('รหัสผ่านเดิม', 'current', 'password', 'autocomplete="current-password"') +
+          authField('รหัสผ่านใหม่', 'next', 'password', 'autocomplete="new-password" minlength="' + PW_MIN + '"') +
+          authField('ยืนยันรหัสผ่านใหม่', 'confirm', 'password', 'autocomplete="new-password"') +
+          '<p class="muted small-note">อย่างน้อย ' + PW_MIN + ' ตัวอักษร มีทั้งตัวอักษรและตัวเลข · ถ้าลืมรหัสผ่านเดิม ให้ออกจากระบบแล้วแจ้งผู้ดูแลระบบรีเซ็ต</p>' +
+          '<div class="actions"><button class="btn primary" type="submit">เปลี่ยนรหัสผ่าน</button></div></form>'
+          : '<p class="muted">บัญชีนี้เข้าสู่ระบบด้วยบัญชีตัวอย่าง (ข้ามรหัสผ่าน) จึงยังไม่มีรหัสผ่าน — ออกจากระบบแล้วใช้ "ตั้งรหัสผ่าน" เพื่อกำหนดรหัสผ่านของตัวเอง</p>') + '</section>');
+  }
+  function bindAccount() {
+    const form = document.getElementById('pwForm');
+    if (!form) return;
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('pwMsg');
+      if (form.elements.next.value !== form.elements.confirm.value) { msg.innerHTML = '<div class="alert error" role="alert">รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน</div>'; return; }
+      const r = await authChangePassword(me(), form.elements.current.value, form.elements.next.value);
+      if (r.error) { msg.innerHTML = '<div class="alert error" role="alert">' + esc(r.message) + '</div>'; return; }
+      form.reset();
+      msg.innerHTML = '<div class="alert success">เปลี่ยนรหัสผ่านเรียบร้อย</div>';
+    });
   }
 
   // ---------------------------------------------------------------- เข้าสู่ระบบ (โหมด Supabase)
@@ -6561,6 +6879,7 @@
   }
 
   async function logout() {
+    if (!REMOTE) { logoutDemo(); return; }
     await window.RemoteApi.signOut();
     try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
     showLogin();
@@ -6621,8 +6940,6 @@
       document.body.classList.add('remote');
       const note = document.querySelector('.sidebar-note');
       if (note) note.textContent = 'ข้อมูลเก็บบนเซิร์ฟเวอร์ — ทุกคนในองค์กรเห็นข้อมูลเดียวกันตามสิทธิ์ของบทบาท';
-    } else {
-      initUserMenu();
     }
     const toggle = document.getElementById('menuToggle');
     const backdrop = document.createElement('div');
