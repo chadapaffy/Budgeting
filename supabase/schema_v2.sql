@@ -31,9 +31,13 @@ create table if not exists public.v2_profiles (
   created_by           uuid,
   last_login_at        timestamptz,
   reset_requested_at   timestamptz,                    -- ผู้ใช้กด "ลืมรหัสผ่าน"
-  reset_at             timestamptz                     -- Admin สร้างลิงก์ตั้งรหัสผ่านใหม่ล่าสุด
+  reset_at             timestamptz                     -- Admin รีเซ็ตรหัสผ่านล่าสุด
 );
 create unique index if not exists v2_profiles_email_key on public.v2_profiles (lower(email));
+
+-- เพิ่มทีหลัง (รอบ "เปิดใช้ครั้งแรก"): เวลาที่ผู้ใช้ตั้งรหัสผ่านของตัวเอง · null = ยังไม่เคยตั้ง / ถูก Admin รีเซ็ตแล้ว รอตั้งใหม่
+alter table public.v2_profiles add column if not exists password_set_at timestamptz;
+update public.v2_profiles set password_set_at = last_login_at where password_set_at is null and last_login_at is not null;
 
 alter table public.v2_roles    enable row level security;
 alter table public.v2_profiles enable row level security;
@@ -96,7 +100,7 @@ language sql immutable set search_path = public as $$
     'companies', to_jsonb(p.companies), 'role', p.role, 'active', p.active)
     || case when p_full then jsonb_build_object(
       'email', p.email, 'createdAt', p.created_at, 'lastLoginAt', p.last_login_at,
-      'resetRequestedAt', p.reset_requested_at, 'resetAt', p.reset_at) else '{}'::jsonb end
+      'resetRequestedAt', p.reset_requested_at, 'resetAt', p.reset_at, 'passwordSetAt', p.password_set_at) else '{}'::jsonb end
 $$;
 
 -- ---------------------------------------------------------------- ฟังก์ชันที่เบราว์เซอร์เรียก
@@ -109,7 +113,7 @@ begin
   u := public._v2_user();
   if u.id is null then return null; end if;
   if p_login then
-    update public.v2_profiles set last_login_at = now(), reset_requested_at = null where id = u.id returning * into u;
+    update public.v2_profiles set last_login_at = now(), reset_requested_at = null, password_set_at = coalesce(password_set_at, now()) where id = u.id returning * into u;
   end if;
   return public._v2_user_json(u, true) || jsonb_build_object('permissions', to_jsonb(public._v2_perms(u.role)));
 end $$;
@@ -161,6 +165,22 @@ language plpgsql volatile security definer set search_path = public as $$
 begin
   update public.v2_profiles set reset_requested_at = now() where lower(email) = lower(btrim(coalesce(p_email, ''))) and active;
   return true;
+end $$;
+
+/**
+ * "เปิดใช้ครั้งแรก": ผู้ใช้กรอกอีเมลตัวเองที่หน้าล็อกอิน (ยังไม่ล็อกอิน) → ระบบตอบว่า Admin เพิ่มอีเมลนี้แล้วหรือยัง และตั้งรหัสผ่านแล้วหรือยัง
+ *   not_found = ไม่มีอีเมลนี้ · inactive = ถูกปิดการใช้งาน · ready = เพิ่มแล้ว ยังไม่เคยตั้งรหัสผ่าน (ตั้งได้) · has_password = ตั้งแล้ว
+ * (การตั้งรหัสผ่านจริงทำใน Edge Function ที่ตรวจสถานะนี้ซ้ำอีกครั้ง)
+ */
+create or replace function public.v2_activation_status(p_email text) returns text
+language plpgsql stable security definer set search_path = public as $$
+declare p public.v2_profiles;
+begin
+  select * into p from public.v2_profiles where lower(email) = lower(btrim(coalesce(p_email, '')));
+  if p.id is null then return 'not_found'; end if;
+  if not p.active then return 'inactive'; end if;
+  if p.password_set_at is null then return 'ready'; end if;
+  return 'has_password';
 end $$;
 
 create or replace function public.v2_list_roles() returns jsonb
@@ -222,3 +242,5 @@ grant execute on function public.v2_me(boolean), public.v2_directory(), public.v
   public.v2_update_user(uuid, text, text, text, text, text[], text),
   public.v2_list_roles(), public.v2_save_role(text, text, text, text[]), public.v2_delete_role(text) to authenticated;
 grant execute on function public.v2_request_reset(text) to anon, authenticated;
+revoke all on function public.v2_activation_status(text) from public, anon, authenticated;
+grant execute on function public.v2_activation_status(text) to anon, authenticated;

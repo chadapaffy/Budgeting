@@ -1183,3 +1183,7 @@ button.link { color: var(--brand); }
 .auth-demo-list { display: flex; flex-direction: column; gap: var(--s-2); margin-top: var(--s-3); }
 .auth-demo-list .btn { justify-content: flex-start; text-align: left; }
 .form-narrow { max-width: 420px; }
+/* ฟอร์มใน Modal (เช่น เพิ่ม/แก้ผู้ใช้) — ใช้ .viewer เดิม ปรับขนาดแผงเท่านั้น */
+.viewer[hidden] { display: none; }
+.viewer-panel.is-form { width: min(680px, 100%); height: auto; max-height: 94vh; }
+.viewer-form { padding: var(--s-4) var(--s-5) var(--s-5); overflow: auto; }
