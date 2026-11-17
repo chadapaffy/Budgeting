@@ -122,7 +122,12 @@
   /** โหมดทดลองเก็บไฟล์แนบในเบราว์เซอร์ จึงจำกัดขนาดไว้เล็ก (ระบบจริงเก็บใน Storage ได้ใหญ่กว่า) */
   const ATTACH_MAX = 400 * 1024;
   /** กลุ่ม Priority ตั้งต้น (ตามไฟล์ Capex / Opex Governance Framework) — เพิ่ม / แก้ได้ที่ข้อมูลหลัก */
-  const DEFAULT_PRIORITY_GROUPS = ['ลดรายจ่าย (Cost Efficiency)', 'เพิ่มรายได้ (Revenue Growth)', 'สร้างโอกาสอนาคต (Strategic/Future Growth)', 'จำเป็นต้องมี/ตามกฎหมาย (Mandatory/Compliance/BAU)'];
+  const DEFAULT_PRIORITY_GROUPS = ['เพิ่มรายได้ (Revenue Growth)', 'ลดรายจ่าย (Cost Efficiency)', 'สร้างโอกาสอนาคต (Strategic/Future Growth)'];
+  /** ตัวเลือกตั้งต้นของหน้าสร้างงบ (ตามที่เจ้าของระบบกำหนด) — เพิ่ม / แก้ได้ที่ข้อมูลหลัก */
+  const DEFAULT_DEPARTMENTS = ['FAC-PBI103', 'IT-WSW', 'PBI101', 'PBI103', 'PBI104'];
+  const DEFAULT_INVEST_GROUPS = ['Digital AI Automation', 'Investment to Build the Future', 'Maintenance or Renovate', 'Platform to Ecosystem for BG', 'Production System Development for Demand Satisfaction'];
+  /** รุ่นของตัวเลือกตั้งต้น: เปลี่ยนเลขเมื่อปรับรายการ เพื่อเติมให้ข้อมูลเดิมในเบราว์เซอร์ครั้งเดียว */
+  const MASTER_LISTS_V = 2;
   const CBS_STATUS = ['Plan', 'On Progress', 'แล้วเสร็จ'];
   const ASSET_TYPES = ['เครื่องจักร', 'เครื่องมือและอุปกรณ์', 'อาคารและสิ่งปลูกสร้าง', 'ยานพาหนะ', 'อุปกรณ์สำนักงาน', 'ซอฟต์แวร์', 'อื่นๆ'];
 
@@ -178,7 +183,16 @@
     companies.forEach((c) => {
       if (!memoParties.some((x) => x.code === c.code)) memoParties.push(Object.assign({ code: c.code, to: '', cc: '', reviewer: '', signer: '' }, MEMO_PARTY_SAMPLE[c.code] || {}));
     });
-    d.master = { companies, departments, groups, assetTypes, glCodes, expenseCategories, memoParties, priorityGroups, investGroups, listGroups, suppliers, memoRule: 2 };
+    // ตัวเลือกตั้งต้นรุ่นใหม่ (ครั้งเดียว): เติมหน่วยงาน / กลุ่ม Priority / กลุ่ม Priority การลงทุน · เอากลุ่ม Priority ตั้งต้นเดิมที่ไม่อยู่ในรายการใหม่ออก ถ้ายังไม่มีงบใช้
+    let prio = priorityGroups;
+    if (m.listsV !== MASTER_LISTS_V) {
+      const used = new Set((d.budgets || []).map((b) => b.priorityGroup).filter(Boolean));
+      const oldDefault = 'จำเป็นต้องมี/ตามกฎหมาย (Mandatory/Compliance/BAU)';
+      prio = DEFAULT_PRIORITY_GROUPS.map((n) => ({ name: n })).concat(priorityGroups.filter((x) => !DEFAULT_PRIORITY_GROUPS.includes(x.name) && (x.name !== oldDefault || used.has(x.name))));
+      DEFAULT_DEPARTMENTS.forEach((n) => addBy(departments, 'name', { name: n }));
+      DEFAULT_INVEST_GROUPS.forEach((n) => addBy(investGroups, 'name', { name: n }));
+    }
+    d.master = { companies, departments, groups, assetTypes, glCodes, expenseCategories, memoParties, priorityGroups: prio, investGroups, listGroups, suppliers, memoRule: 2, listsV: MASTER_LISTS_V };
     return d;
   }
   const companyMap = () => Object.fromEntries(db.master.companies.map((c) => [c.code, c.name]));
