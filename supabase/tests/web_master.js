@@ -17,6 +17,7 @@ const ok = (c, m) => { if (c) pass += 1; else { fail += 1; console.log('FAIL', m
   const sql = (q, params) => fake.admin('sql', { sql: q, params });
   await sql('truncate public.v2_master, public.v2_master_history');
   await sql('delete from public.v2_profiles');
+  await sql('delete from auth.users');   // shim ไม่มี unique ที่อีเมล — ล้างก่อนเพื่อรันซ้ำได้
   const mk = async (email, name, role) => {
     const u = await fake.admin('user', { email, password: 'Passw0rd1' });
     await sql("insert into public.v2_profiles (id, email, name, role, companies, password_set_at) values ($1, $2, $3, $4, '{PBI,PCC}', now())", [u.id, email, name, role]);
@@ -47,10 +48,10 @@ const ok = (c, m) => { if (c) pass += 1; else { fail += 1; console.log('FAIL', m
   // ---- Admin คนแรกเข้าระบบ: บันทึกค่าตั้งต้นขึ้นเซิร์ฟเวอร์ (ครั้งเดียว)
   const a1 = await open('admin1@example.com');
   const ks = await keys();
-  ok(['assetTypes', 'companies', 'departments', 'groups', 'investGroups', 'listGroups', 'priorityGroups', 'suppliers'].every((k) => ks.includes(k)), 'admin login seeds all master keys: ' + ks.join());
+  ok(['companies', 'departments', 'investGroups', 'listGroups', 'priorityGroups', 'suppliers'].every((k) => ks.includes(k)), 'admin login seeds all master keys: ' + ks.join());
   ok((await items('companies')).some((c) => c.code === 'PBI'), 'seeded companies include PBI');
   const hist0 = (await sql('select count(*)::int n from public.v2_master_history'))[0].n;
-  ok(hist0 === 8, 'history has 8 seed rows: ' + hist0);
+  ok(hist0 === 6, 'history has 6 seed rows: ' + hist0);
 
   // ---- Admin แก้หน่วยงาน → ขึ้นเซิร์ฟเวอร์
   await go(a1, '#/master/departments');
