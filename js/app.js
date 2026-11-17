@@ -1132,7 +1132,7 @@
         '" data-company="' + esc(b.company) + '" data-type="' + esc(b.type) +
         '" data-code="' + esc(b.code) + '" data-name="' + esc(b.name) + '" data-dept-sort="' + esc(b.department) + '" data-owner="' + esc(ownerText(b)) +
         '" data-statelabel="' + esc(BUDGET_STATE[state]) + '" data-total="' + total + '" data-used="' + (active ? us.used : 0) + '" data-reserved="' + (active ? us.reserved : 0) +
-        '" data-remaining="' + (active ? us.remaining : 0) + '" data-pct="' + pct + '">' +
+        '" data-remaining="' + (active ? us.remaining : state === 'cancelled' ? 0 : total) + '" data-pct="' + pct + '">' +
         '<td class="nowrap"><a class="mono" href="#/budget/' + b.id + '">' + esc(b.code) + '</a><div>' + badge(b.type, TYPE_SHORT[b.type]) + '</div></td>' +
         '<td class="b-name"><a href="#/budget/' + b.id + '">' + esc(b.name) + '</a><div class="muted">' + esc(sub) + '</div></td>' +
         '<td class="nowrap">' + esc(b.company) + ' · ' + esc(b.fiscalYear) + '</td>' +
@@ -1141,7 +1141,9 @@
         '<td class="num">' + money(total) + (active ? '' : '<div class="muted">' + (b.setup ? 'วงเงินงบ' : 'ที่ขออนุมัติ') + '</div>') + '</td>' +
         (active
           ? '<td class="num">' + money(us.used) + '</td><td class="num">' + money(us.reserved) + '</td><td class="num"><strong>' + moneyCell(us.remaining) + '</strong><div class="muted">ใช้ไป ' + pct + '%</div></td>'
-          : '<td class="num muted">–</td><td class="num muted">–</td><td class="num muted">–</td>') +
+          : '<td class="num muted">–</td><td class="num muted">–</td>' +
+            // ยังไม่เปิดใช้งบ: ยังไม่มีการใช้ คงเหลือ = วงเงินทั้งหมด (ยกเลิกแล้วไม่แสดง)
+            (state === 'cancelled' ? '<td class="num muted">–</td>' : '<td class="num">' + money(total) + '<div class="muted">ยังไม่ได้ใช้</div></td>')) +
         '<td class="b-acts">' + acts + '</td></tr>';
     }).join('');
     const sortKey = { dept: 'dept-sort' };
