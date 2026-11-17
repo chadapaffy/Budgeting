@@ -1234,32 +1234,15 @@
 
   const usedItemIds = () => new Set([].concat(...db.requests.map(reqItemIds)));
 
-  function capexRow(it, locked) {
-    return '<tr data-item-id="' + esc(it.id || '') + '">' +
-      '<td><input name="itCode" value="' + esc(it.code) + '" placeholder="2026-01-XX001" aria-label="รหัสรายการย่อย"></td>' +
-      '<td><input name="itName" value="' + esc(it.name) + '" aria-label="ชื่อรายการ"></td>' +
-      '<td><div class="select-wrap"><select name="itAsset" aria-label="ประเภทสินทรัพย์">' +
-      optList(db.master.assetTypes, 'name', (t) => t.name, it.assetType || assetTypeList()[0]) + '</select></div></td>' +
-      '<td><input name="itAmount" type="number" min="0" step="0.01" class="right" value="' + esc(it.amount) + '" aria-label="วงเงิน"></td>' +
-      '<td>' + (locked ? '<span class="muted" title="มีการเบิกใช้แล้ว ลบไม่ได้">🔒</span>' : '<button type="button" class="btn small bad" data-remove-item title="ลบ">×</button>') + '</td></tr>';
+  /** แถวรายการย่อย (CAPEX / OPEX แบบเดียวกัน): รหัส · ชื่อ · วงเงิน (รวม VAT) — เก็บประเภทสินทรัพย์ / GL เดิมไว้ในแถว */
+  function itemRow(it) {
+    const total = it.amount === '' || it.amount === undefined || it.amount === null ? '' : round2(Number(it.amount || 0) + Number(it.vat || 0));
+    return '<tr data-item-id="' + esc(it.id || '') + '" data-asset="' + esc(it.assetType || '') + '" data-gl="' + esc(it.glCode || '') + '" data-gl-name="' + esc(it.glName || '') + '">' +
+      '<td><input name="itCode" value="' + esc(it.code || '') + '" placeholder="เช่น 1 หรือ 2026-01-XX001" aria-label="รหัสรายการย่อย"></td>' +
+      '<td><input name="itName" value="' + esc(it.name || '') + '" placeholder="เช่น ค่าแรงดูแลกล้า" aria-label="ชื่อรายการ"></td>' +
+      '<td><input name="itAmount" type="number" min="0" step="0.01" class="right" placeholder="0.00" value="' + esc(total === 0 ? '' : total) + '" aria-label="วงเงิน (รวม VAT)"></td>' +
+      '<td class="center"><button type="button" class="row-x" data-remove-item title="ลบรายการ" aria-label="ลบรายการ">×</button></td></tr>';
   }
-
-  function cbsRow(it, locked) {
-    return '<tr data-item-id="' + esc(it.id || '') + '">' +
-      '<td><input name="itCode" value="' + esc(it.code) + '" placeholder="1.1" aria-label="รหัส"></td>' +
-      '<td><input name="itName" value="' + esc(it.name) + '" aria-label="รายการ"></td>' +
-      '<td><input name="itAmount" type="number" min="0" step="0.01" class="right" value="' + esc(it.amount || '') + '" aria-label="ก่อน VAT"></td>' +
-      '<td class="center"><input name="itVat" type="checkbox"' + (Number(it.vat) > 0 ? ' checked' : '') + ' aria-label="VAT 7%"></td>' +
-      '<td><input name="itGl" list="glList" value="' + esc(it.glCode) + '" aria-label="GL Code"></td>' +
-      '<td><input name="itGlName" value="' + esc(it.glName) + '" aria-label="GL Name"></td>' +
-      '<td>' + (locked ? '<span class="muted" title="มีการเบิกใช้แล้ว ลบไม่ได้">🔒</span>' : '<button type="button" class="btn small bad" data-remove-item title="ลบ">×</button>') + '</td></tr>';
-  }
-
-  // Item หลักของ OPEX (Item ย่อย 1.1, 2.1 เพิ่มภายหลังเมื่องบเปิดใช้แล้ว)
-  const CBS_TEMPLATE = [
-    { code: '1', name: 'ต้นทุนวัตถุดิบ' }, { code: '2', name: 'ต้นทุนค่าแรง' },
-    { code: '3', name: 'ต้นทุนค่าเช่า' }, { code: '4', name: 'รายการส่วนเพิ่มอื่นๆ' }
-  ];
 
   /**
    * ใครสร้าง/แก้ฟอร์มงบได้
@@ -1286,124 +1269,154 @@
         : 'ไม่มีสิทธิ์สร้างงบ') + '</div>';
     }
     const u = me();
+    const setup = mode === 'setup';
     const year = new Date().getFullYear();
-    // คัดลอกจากโครงการ OPEX ก่อนหน้า (Business เจ้าของงบ ตอนสร้างงบใหม่เท่านั้น)
-    const copyList = !b && mode === 'draft'
-      ? db.budgets.filter((x) => x.type === 'CBS' && x.ownerId === u.id && x.state !== 'cancelled').sort((x, y) => String(y.createdAt || '').localeCompare(String(x.createdAt || '')))
-      : [];
+    // คัดลอกงบอื่น: Business = งบของตนเอง · ผู้คุมงบ = ทุกงบ
+    const copyList = !b ? db.budgets.filter((x) => x.state !== 'cancelled' && (setup || x.ownerId === u.id))
+      .sort((x, y) => String(y.createdAt || '').localeCompare(String(x.createdAt || ''))) : [];
     const copyId = params && params.get ? params.get('copy') : '';
     const copySrc = copyList.find((x) => x.id === copyId) || null;
+    const mainItems = (x) => (x.type === 'CBS' ? sortedItems(x).filter((it) => depth(it) === 0) : x.items);
     const v = b || (copySrc ? {
-      type: 'CBS', structure: copySrc.structure || 'items', company: copySrc.company, fiscalYear: copySrc.fiscalYear, group: copySrc.group || '', code: '', parentCode: '', name: copySrc.name,
-      department: copySrc.department || '', ownerId: u.id, note: copySrc.note || '', listGroup: copySrc.listGroup || '', priorityGroup: copySrc.priorityGroup || '', priorityReason: copySrc.priorityReason || '', financeOwner: copySrc.financeOwner || '', status: 'Plan', startDate: '', endDate: '', production: {},
-      // คัดลอกเฉพาะ Item หลัก (รหัส ชื่อ วงเงิน VAT GL) — Item ย่อยและข้อมูลการอนุมัติไม่ติดไป
-      items: copySrc.items.filter((it) => depth(it) === 0).map((it) => ({ code: it.code, name: it.name, qty: '', unit: '', amount: it.amount, vat: it.vat || 0, glCode: it.glCode || '', glName: it.glName || '' }))
+      type: copySrc.type, structure: copySrc.structure || 'items', company: copySrc.company, fiscalYear: copySrc.fiscalYear, group: copySrc.group || '', code: '', name: copySrc.name,
+      department: copySrc.department || '', ownerId: setup ? copySrc.ownerId : u.id, ownerName: setup ? copySrc.ownerName || '' : '', note: copySrc.note || '',
+      listGroup: copySrc.listGroup || '', priorityGroup: copySrc.priorityGroup || '', investGroup: copySrc.investGroup || '', priorityReason: copySrc.priorityReason || '', financeOwner: copySrc.financeOwner || '',
+      // คัดลอกรายการหลักพร้อมวงเงิน — Item ย่อย / ข้อมูลการอนุมัติ / ไฟล์แนบไม่ติดไป
+      items: copySrc.structure === 'project' ? [{ code: '', name: 'งบรวมทั้งโครงการ', amount: budgetTotal(copySrc), vat: 0 }]
+        : mainItems(copySrc).map((it) => ({ code: it.code, name: it.name, amount: it.amount, vat: it.vat || 0, assetType: it.assetType || '', glCode: it.glCode || '', glName: it.glName || '' }))
     } : {
-      type: 'CAPEX', structure: 'items', company: (db.master.companies[0] || {}).code || '', fiscalYear: year + 1, group: '', code: '', parentCode: '', name: '',
-      department: '', ownerId: mode === 'setup' ? '' : u.id, note: '', status: 'Plan', startDate: '', endDate: '', production: {}, items: []
+      type: 'CAPEX', structure: 'items', company: (db.master.companies[0] || {}).code || '', fiscalYear: year + 1, group: '', code: '', name: '',
+      department: '', ownerId: setup ? '' : u.id, note: '', items: []
     });
     const structure = v.structure || 'items';
     const projItem = structure === 'project' && v.items[0] ? v.items[0] : {};
+    const rows = structure !== 'project' && v.items.length ? mainItems(v) : [{}];
     const requesters = USERS.filter(canRequestUser);
-    const capexItems = v.type === 'CAPEX' && structure === 'items' && v.items.length ? v.items : [{ code: '', name: '', amount: '' }];
-    const cbsMain = v.type === 'CBS' ? sortedItems(v).filter((x) => depth(x) === 0) : [];
-    const cbsItems = cbsMain.length ? cbsMain : CBS_TEMPLATE;
     const field = (label, inner, extra) => '<label class="field"' + (extra || '') + '><span>' + label + '</span>' + inner + '</label>';
     const select = (name, inner, attrs) => '<div class="select-wrap"><select name="' + name + '"' + (attrs || '') + '>' + inner + '</select></div>';
     /** ชื่อช่องตามไฟล์ Governance: CAPEX / OPEX ใช้ชื่อต่างกัน (สลับตามประเภทงบที่เลือก) */
     const dual = (capex, opex) => '<span data-for="CAPEX">' + capex + '</span><span data-for="CBS">' + opex + '</span>';
-    const radio = (value, title, sub) => '<label class="choice-opt"><input type="radio" name="structure" value="' + value + '"' + (structure === value ? ' checked' : '') + '>' +
+    const pick = (name, value, title, sub, cur) => '<label class="choice-opt"><input type="radio" name="' + name + '" value="' + value + '"' + (cur === value ? ' checked' : '') + '>' +
       '<span><strong>' + title + '</strong><small>' + sub + '</small></span></label>';
-    const title = mode === 'setup' ? (b ? 'แก้ไขงบ ' + esc(b.code) : 'ลงงบประจำปี') : b ? 'แก้ไขร่างคำขออนุมัติงบ ' + esc(b.code) : 'ขออนุมัติงบใหม่';
-    const introFor = (type) => mode === 'setup'
-      ? 'ผู้คุมงบลงงบลงทุน (CAPEX) ประจำปีให้ Business — เมื่อบันทึก งบจะรอ Business เจ้าของงบ ขอดำเนินการใช้งบครั้งแรก โดยทำ Memo ให้ผู้บริหารเซ็น แนบแล้วส่งให้ผู้คุมงบยืนยัน · ลงหลายงบพร้อมกันได้ที่ Import Excel (ไฟล์ Capex / Opex Governance Framework) · งบ OPEX ปกติ Business เป็นผู้สร้างและส่งอนุมัติเอง'
-      : (type === 'CBS'
-        ? 'บันทึกเป็นร่างก่อน → พิมพ์แบบฟอร์มของระบบ หรือใช้เอกสารขออนุมัติของตนเอง ส่งผู้บริหารอนุมัติเอง (OPEX ไม่ต้องเข้าบอร์ด) → เมื่อผู้บริหารอนุมัติ นำเอกสารอนุมัติกลับมาแนบในระบบ แล้วกด "ขอดำเนินการใช้งบ" งบเปิดใช้ทันที (ถ้าผู้บริหารอนุมัติไม่เต็มจำนวน ให้แก้ตัวเลขในร่างก่อน)'
-        : 'บันทึกเป็นร่างก่อน → พิมพ์แบบฟอร์มเข้าที่ประชุม → เมื่อที่ประชุมอนุมัติ แนบมติแล้วส่งให้ผู้คุมงบยืนยันเปิดใช้ (ถ้าที่ประชุมอนุมัติไม่เต็มจำนวน ให้แก้ตัวเลขในร่างก่อนส่ง)');
-
-    const intro = introFor(v.type);
-    const copyBar = copyList.length
-      ? '<section class="card copy-card"><div class="copy-row"><label class="field"><span>คัดลอกจากโครงการ OPEX ก่อนหน้า</span><div class="select-wrap"><select id="copyFrom" aria-label="โครงการ OPEX ที่จะคัดลอก">' +
-        '<option value="">— เลือกโครงการ —</option>' + copyList.map((x) => opt(x.id, x.code + ' · ' + x.name + ' · ปี ' + x.fiscalYear, copySrc ? copySrc.id : '')).join('') + '</select></div></label>' +
+    const finNames = uniq(USERS.filter((x) => permsOf(x).includes('budget.manage')).map((x) => x.name).concat(db.budgets.map((x) => x.financeOwner).filter(Boolean)).concat(v.financeOwner ? [v.financeOwner] : []));
+    const introFor = (type) => (setup
+      ? 'ผู้คุมงบสร้างงบให้ Business (หรือ Import Excel) — บันทึกแล้วงบรอ Business เจ้าของงบ ขอดำเนินการใช้งบ' + (type === 'CAPEX' ? ' (ทำ Memo ให้ผู้บริหารเซ็น แล้วผู้คุมงบยืนยัน)' : ' (เปิดใช้ได้ทันที)')
+      : type === 'CBS' ? 'เริ่มจากบันทึกร่าง แล้วพิมพ์แบบฟอร์ม หรือใช้เอกสารขออนุมัติของตนเอง เสนอผู้บริหารอนุมัติ'
+        : 'เริ่มจากบันทึกร่าง แล้วพิมพ์แบบฟอร์มเพื่อนำเข้าที่ประชุมอนุมัติ');
+    const steps = setup ? ['สร้างงบประมาณ', 'รอ Business ขอดำเนินการใช้งบ', 'เปิดใช้งบ'] : ['สร้างงบประมาณ', 'รออนุมัติงบ', 'ยืนยันการเปิดใช้งบ'];
+    const stateText = b ? (b.incomplete ? 'ร่าง (ยังกรอกไม่ครบ)' : BUDGET_STATE[b.state] || '') : 'สร้างงบ';
+    const title = b ? 'แก้ไขงบ ' + esc(b.code) : 'สร้างงบประมาณ';
+    const copyPanel = copyList.length
+      ? '<section class="card copy-card" id="copyPanel"' + (copySrc ? '' : ' hidden') + '><div class="copy-row"><label class="field"><span>คัดลอกจากงบที่มีอยู่</span><div class="select-wrap"><select id="copyFrom" aria-label="งบที่จะคัดลอก">' +
+        '<option value="">— เลือกงบ —</option>' + copyList.map((x) => opt(x.id, TYPE_SHORT[x.type] + ' · ' + x.code + ' · ' + x.name + ' · ปี ' + x.fiscalYear, copySrc ? copySrc.id : '')).join('') + '</select></div></label>' +
         '<button type="button" class="btn" id="copyBtn" disabled>คัดลอก</button></div>' +
-        '<p class="muted small-note">ใช้โครงการเดิมเป็นต้นแบบ: ดึงบริษัท หน่วยงาน กลุ่มงบ ชื่อ และ Item หลักพร้อมวงเงิน / VAT / GL มาใส่ฟอร์มให้ แล้วแก้ได้ — รหัสโครงการต้องกรอกใหม่ · Item ย่อยและข้อมูลการอนุมัติไม่ถูกคัดลอก</p></section>'
+        '<p class="muted small-note">ใช้งบเดิมเป็นต้นแบบ: ดึงประเภทงบ บริษัท หน่วยงาน ข้อมูล Priority ชื่อ และรายการหลักพร้อมวงเงินมาใส่ฟอร์ม · รหัสโครงการต้องกรอกใหม่ · ไม่คัดลอก Item ย่อย / ข้อมูลการอนุมัติ / ไฟล์แนบ</p></section>'
       : '';
     const copyNote = copySrc
-      ? '<div class="alert info">คัดลอกจาก <strong>' + esc(copySrc.code) + '</strong> ' + esc(copySrc.name) + ' แล้ว — กรอกรหัสโครงการใหม่ และปรับชื่อ / วงเงินตามโครงการนี้ได้ · <a href="#/budget/new">เริ่มใหม่โดยไม่คัดลอก</a></div>'
+      ? '<div class="alert info">คัดลอกจาก <strong>' + esc(copySrc.code) + '</strong> ' + esc(copySrc.name) + ' แล้ว — กรอกรหัสโครงการใหม่ และปรับชื่อ / วงเงินตามงบนี้ได้ · <a href="#/budget/new">เริ่มใหม่โดยไม่คัดลอก</a></div>'
       : '';
-    return '<div class="page-head"><div><h1>' + title + '</h1><div class="page-sub" id="budgetIntro" data-capex="' + esc(introFor('CAPEX')) + '" data-cbs="' + esc(introFor('CBS')) + '">' + intro + '</div></div></div>' +
-      copyBar + copyNote +
-      '<div id="formError"></div>' +
-      '<form id="budgetForm" class="card" data-id="' + esc(id || '') + '" data-mode="' + mode + '">' +
-      '<datalist id="glList">' + db.master.glCodes.map((g) => '<option value="' + esc(g.code) + '">' + esc(g.name) + '</option>').join('') + '</datalist>' +
+
+    const card1 = '<section class="card form-section">' +
+      '<div class="section-head"><div><h2 class="section-title"><span class="step">1</span>ข้อมูลโครงการ</h2><div class="section-sub">ข้อมูลตาม ' + dual('Capex Request', 'Opex Request') + ' (Capex / Opex Governance Framework)</div></div>' +
+      '<div class="choice type-pick">' + pick('type', 'CAPEX', 'CAPEX', 'งบลงทุน', v.type) + pick('type', 'CBS', 'OPEX', 'งบดำเนินการ', v.type) + '</div></div>' +
       '<div class="row">' +
-      field('ประเภทงบ', select('type', (mode === 'setup' && v.type !== 'CBS' ? ['CAPEX'] : ['CAPEX', 'CBS']).map((t) => opt(t, TYPE_LABEL[t], v.type)).join(''))) +
+      field(dual('Capex ID', 'Opex ID') + ' (รหัสโครงการ)', '<input name="code" required placeholder="ระบุรหัสโครงการ" value="' + esc(v.code) + '">') +
+      field(dual('ชื่อโครงการ', 'ชื่อรายการ/โครงการ'), '<input name="name" required placeholder="ระบุชื่อโครงการ" value="' + esc(v.name) + '">') +
+      '</div><div class="row">' +
       field('บริษัท', select('company', optList(db.master.companies, 'code', (c) => c.code + (c.name ? ' — ' + c.name : ''), v.company))) +
-      field('กลุ่มงบประมาณ', select('group', '<option value="">— เลือก —</option>' +
-        optList(db.master.groups, 'code', (g) => g.code + (g.name ? ' — ' + g.name : ''), v.group))) +
-      '</div>' +
-      '<fieldset class="prio-set gov-set"><legend>' + dual('ข้อมูลตาม Capex Request (Capex / Opex Governance Framework)', 'ข้อมูลตาม Opex Request (Capex / Opex Governance Framework)') + '</legend>' +
-      '<div class="row">' +
-      field(dual('Capex ID', 'Opex ID') + ' <small class="muted">(รหัสโครงการ)</small>', '<input name="code" required value="' + esc(v.code) + '">') +
-      field(dual('ชื่อโครงการ', 'ชื่อรายการ/โครงการ'), '<input name="name" required value="' + esc(v.name) + '">') +
-      '</div><div class="row">' +
-      field('หน่วยงานที่ขอ', select('department', '<option value="">— เลือก —</option>' + optList(db.master.departments, 'name', (d) => d.name, v.department), ' required')) +
-      field('กลุ่มรายการ', select('listGroup', '<option value="">— เลือก —</option>' + optList(db.master.listGroups, 'name', (x) => x.name, v.listGroup || ''))) +
-      '</div><div class="row">' +
+      field('หน่วยงานที่ขอ', select('department', '<option value="">— เลือกหน่วยงาน —</option>' + optList(db.master.departments, 'name', (d) => d.name, v.department), ' required')) +
+      '</div><div class="form-divider"></div><div class="row">' +
       field('กลุ่ม Priority', select('priorityGroup', '<option value="">— เลือก —</option>' + optList(db.master.priorityGroups, 'name', (x) => x.name, v.priorityGroup || ''))) +
       field('กลุ่ม Priority การลงทุน (กลุ่มการลงทุน New)', select('investGroup', '<option value="">— เลือก —</option>' + optList(db.master.investGroups, 'name', (x) => x.name, v.investGroup || '')), ' data-for="CAPEX"') +
       '</div>' +
-      field('เหตุผลสนับสนุน Priority (ย่อ)', '<textarea name="priorityReason" rows="2">' + esc(v.priorityReason || '') + '</textarea>') +
-      '<div class="row">' +
-      '<div class="field"><span>' + dual('มูลค่า Capex รวม (บาท)', 'มูลค่ารวมที่ขออนุมัติ (บาท)') + '</span><div class="out" id="govTotal">0.00</div></div>' +
-      field(dual('เฉลี่ยปีที่ลงทุน', 'ปีงบประมาณ'), '<input name="fiscalYear" type="number" required value="' + esc(v.fiscalYear) + '">') +
-      '<div class="field"><span>สถานะอนุมัติ</span><div class="out left">' + esc(govStatus(b || { state: mode === 'setup' ? 'pending_open' : 'draft' })) + '</div></div>' +
-      '</div><div class="row">' +
-      (mode === 'setup'
-        ? field(dual('Owner (หลัก 1 คน)', 'เจ้าของ Action Plan') + ' <small class="muted">— Business เจ้าของงบ' + (!v.ownerId && v.ownerName ? ' · ชื่อในไฟล์: ' + esc(v.ownerName) : '') + '</small>', select('ownerId', '<option value="">— เลือก —</option>' + requesters.map((x) => opt(x.id, x.name + (x.title ? ' — ' + x.title : ''), v.ownerId)).join('')))
-        : '<input type="hidden" name="ownerId" value="' + esc(v.ownerId) + '"><div class="field"><span>' + dual('Owner (หลัก 1 คน)', 'เจ้าของ Action Plan') + ' <small class="muted">— Business เจ้าของงบ</small></span><div class="out left">' + esc(userName(v.ownerId)) + '</div></div>') +
-      field('เจ้าของฝ่ายการเงิน (ติดตามร่วม)', '<input name="financeOwner" list="finOwnerList" value="' + esc(v.financeOwner || '') + '" autocomplete="off">' +
-        '<datalist id="finOwnerList">' + uniq(USERS.filter((x) => permsOf(x).includes('budget.manage')).map((x) => x.name).concat(db.budgets.map((x) => x.financeOwner).filter(Boolean))).map((n) => '<option value="' + esc(n) + '">').join('') + '</datalist>') +
-      '</div></fieldset>' +
-      (mode === 'setup'
-        ? '<div class="row">' + field('วันที่อนุมัติงบประจำปี (ถ้ามี)', '<input name="meetingDate" type="date" value="' + esc((v.meeting || {}).date || '') + '">') +
-          field('อ้างอิงการอนุมัติงบประจำปี (ถ้ามี)', '<input name="meetingNo" placeholder="เช่น มติที่ประชุม 12/2569" value="' + esc((v.meeting || {}).no || '') + '">') +
-          field('ผู้บริหารที่อนุมัติ (OPEX)', '<input name="meetingBy" placeholder="ชื่อ / ตำแหน่ง" value="' + esc((v.meeting || {}).by || '') + '">', ' data-for="CBS"') + '</div>'
-        : '') +
+      field('เหตุผลสนับสนุน Priority (ย่อ)', '<textarea name="priorityReason" rows="2" placeholder="อธิบายเหตุผลและความสำคัญของการลงทุน">' + esc(v.priorityReason || '') + '</textarea>') +
+      '<div class="form-divider"></div><div class="row row-3">' +
+      field(dual('ปีที่ลงทุน', 'ปีงบประมาณ'), '<input name="fiscalYear" type="number" required value="' + esc(v.fiscalYear) + '">') +
+      field('เจ้าของฝ่ายการเงิน (ติดตามร่วม)', select('financeOwner', '<option value="">— เลือก —</option>' + finNames.map((n) => opt(n, n, v.financeOwner || '')).join(''))) +
+      (setup
+        ? field(dual('Owner (หลัก 1 คน)', 'เจ้าของ Action Plan') + ' — Business เจ้าของงบ' + (!v.ownerId && v.ownerName ? ' <small class="muted">(ชื่อในไฟล์: ' + esc(v.ownerName) + ')</small>' : ''),
+          select('ownerId', '<option value="">— เลือก —</option>' + requesters.map((x) => opt(x.id, x.name + (x.title ? ' — ' + x.title : ''), v.ownerId)).join('')))
+        : '<input type="hidden" name="ownerId" value="' + esc(v.ownerId) + '"><div class="field"><span>' + dual('Owner (หลัก 1 คน)', 'เจ้าของ Action Plan') + ' — Business เจ้าของงบ</span><div class="out left">' + esc(userName(v.ownerId)) + '</div></div>') +
+      '</div>' +
+      // ค่าที่ไม่มีในฟอร์มนี้แล้ว (มาจาก Import / ข้อมูลเดิม) เก็บไว้ตามเดิม
+      '<input type="hidden" name="group" value="' + esc(v.group || '') + '"><input type="hidden" name="listGroup" value="' + esc(v.listGroup || '') + '">' +
+      '</section>';
 
-      '<fieldset><legend>โครงสร้างงบ</legend><div class="choice">' +
-      radio('items', dual('แยกรายการย่อย', 'แยก Item'), 'คุมวงเงินรายรายการ เหมาะกับงบที่รู้รายละเอียดแล้ว') +
-      radio('project', 'งบรวมทั้งโครงการ', 'ยังไม่แยกรายการ — ตอนใช้งบพิมพ์ชื่อรายการเอง คุมวงเงินที่ระดับโครงการ') + '</div>' +
+    const card2 = '<section class="card form-section">' +
+      '<div class="section-head"><div><h2 class="section-title"><span class="step">2</span>โครงสร้างงบและรายการย่อย</h2><div class="section-sub">เลือกรูปแบบการควบคุมวงเงินของโครงการ</div></div>' +
+      '<div class="choice type-pick wide">' + pick('structure', 'items', 'แยกรายการย่อย', 'คุมวงเงินรายรายการ เหมาะกับงบที่รู้รายละเอียดแล้ว', structure) +
+        pick('structure', 'project', 'งบรวมทั้งโครงการ', 'ยังไม่แยกรายการ พิมพ์ชื่อรายการตอนใช้งบ', structure) + '</div></div>' +
+      '<div data-structure="items"><div class="groups-box">' +
+      '<div class="table-wrap"><table class="edit-table group-table item-table"><colgroup><col class="c-code"><col><col class="c-amt"><col class="c-del"></colgroup>' +
+      '<thead><tr><th>รหัสรายการย่อย</th><th>ชื่อรายการ</th><th class="num">วงเงิน (รวม VAT)</th><th></th></tr></thead>' +
+      '<tbody id="itemRows">' + rows.map(itemRow).join('') + '</tbody></table></div>' +
+      '<button type="button" class="link-add" data-add-row>+ เพิ่มรายการย่อย</button>' +
+      '<div class="table-wrap group-sum"><table class="edit-table group-table item-table"><colgroup><col class="c-code"><col><col class="c-amt"><col class="c-del"></colgroup>' +
+      '<tbody><tr><td colspan="2" class="right"><strong>รวม</strong></td><td class="num"><strong id="itemsTotal">0.00</strong></td><td></td></tr></tbody></table></div></div>' +
+      '<p class="muted small-note" data-for="CBS">OPEX: รหัส Item หลักไม่มีจุด (1, 2, 3 …) · Item ย่อย (1.1) เพิ่มได้หลังเปิดใช้งบ · GL Code ฝ่ายบัญชีใส่ภายหลัง</p></div>' +
       '<div class="row" data-structure="project">' +
-      field('วงเงินรวมทั้งโครงการ (รวม VAT)', '<input name="projAmount" type="number" min="0" step="0.01" class="right" value="' + esc(projItem.amount || '') + '">') +
-      field('ประเภทสินทรัพย์หลัก', select('projAsset', optList(db.master.assetTypes, 'name', (t) => t.name, projItem.assetType || assetTypeList()[0])), ' data-for="CAPEX"') +
-      '</div></fieldset>' +
+      field('วงเงิน (รวม VAT)', '<input name="projAmount" type="number" min="0" step="0.01" class="right" placeholder="0.00" value="' + esc(projItem.amount === undefined ? '' : round2(Number(projItem.amount || 0) + Number(projItem.vat || 0)) || '') + '">') +
+      '</div></section>';
 
-      '<fieldset data-for="CAPEX" data-structure="items"><legend>รายการย่อย (Item No.)</legend>' +
-      '<div class="table-wrap"><table class="edit-table"><thead><tr><th style="width:11rem">รหัสรายการย่อย</th><th style="min-width:14rem">ชื่อรายการ</th>' +
-      '<th style="width:10rem">ประเภทสินทรัพย์</th><th class="num" style="width:10rem">วงเงิน (รวม VAT)</th><th style="width:3rem"></th></tr></thead>' +
-      '<tbody id="capexRows">' + capexItems.map((it) => capexRow(it, false)).join('') + '</tbody></table></div>' +
-      '<div class="actions table-actions"><button type="button" class="btn small" data-add-row="capex">+ เพิ่มรายการย่อย</button>' +
-      '<span class="muted">รวม <strong data-total="capex">0.00</strong> บาท</span></div></fieldset>' +
+    const side = '<aside class="detail-side"><div class="card total-card"><h3 class="side-title">สรุปคำขอ</h3>' +
+      '<div class="sum-box"><span>' + dual('มูลค่า Capex รวม (บาท)', 'มูลค่ารวมที่ขออนุมัติ (บาท)') + '</span><div class="total-amount" id="govTotal">0.00</div><small>รวม VAT แล้ว</small></div>' +
+      '<dl class="kv compact"><dt>ประเภทงบ</dt><dd id="sumType"></dd><dt>' + dual('ปีที่ลงทุน', 'ปีงบประมาณ') + '</dt><dd id="sumYear"></dd>' +
+      '<dt>รายการย่อย</dt><dd id="sumItems"></dd><dt>สถานะ</dt><dd><span class="sum-state">' + esc(stateText) + '</span></dd></dl></div>' +
+      '<div class="card"><h3 class="side-title">หมายเหตุ / ความจำเป็นของโครงการ</h3><textarea name="note" rows="5" aria-label="หมายเหตุ / ความจำเป็นของโครงการ" placeholder="ระบุรายละเอียดเพิ่มเติม หรือความจำเป็นของโครงการ">' + esc(v.note || '') + '</textarea></div></aside>';
 
-      '<fieldset data-for="CBS" data-structure="items"><legend>Item ของงบ OPEX</legend>' +
-      '<p class="muted small-note">งบ OPEX ต้องมี Item — กรอก <strong>Item หลัก</strong> (รหัส 1, 2, 3 …) พร้อมวงเงินของแต่ละ Item (ไม่ต้องกรอกจำนวน/หน่วย) · <strong>Item ย่อย</strong> 2 ระดับ (1.1 และ 1.1.1) พร้อมจำนวน/หน่วย เพิ่มได้เรื่อย ๆ ภายหลังเมื่องบเปิดใช้แล้ว ที่หน้ารายละเอียดงบ (วงเงินรวมไม่เกิน Item หลัก และจะกำหนดวงเงินหรือไม่ก็ได้)</p>' +
-      '<div class="table-wrap"><table class="edit-table"><thead><tr><th style="width:5.5rem">รหัส</th><th style="min-width:12rem">รายการ</th>' +
-      '<th class="num" style="width:9rem">ก่อน VAT</th><th style="width:4rem">VAT 7%</th>' +
-      '<th style="width:7rem">GL Code <small class="muted">(บัญชีใส่ทีหลังได้)</small></th><th style="width:10rem">GL Name</th><th style="width:3rem"></th></tr></thead>' +
-      '<tbody id="cbsRows">' + cbsItems.map((it) => cbsRow(it, false)).join('') + '</tbody></table></div>' +
-      '<div class="actions table-actions"><button type="button" class="btn small" data-add-row="cbs">+ เพิ่มรายการ</button>' +
-      '<span class="muted">รวม (รวม VAT) <strong data-total="cbs">0.00</strong> บาท</span></div></fieldset>' +
+    const bar = '<div class="card form-bar"><p class="muted bar-hint">กรอกช่องที่มี * และรายการย่อยให้ครบก่อนบันทึก</p><div class="actions">' +
+      '<a class="btn" data-back href="' + (b ? '#/budget/' + b.id : setup ? '#/budgets' : '#/my-budgets') + '">ยกเลิก</a>' +
+      (setup ? '' : '<button class="btn" type="submit" data-action="draft" formnovalidate>บันทึกแบบร่าง</button>') +
+      '<button class="btn primary" type="submit" data-action="create">' + (b ? (setup ? 'บันทึกงบ' : 'บันทึกและสร้างงบ') : 'สร้างงบ') + '</button></div></div>';
 
-      field('หมายเหตุ / ความจำเป็นของโครงการ', '<textarea name="note">' + esc(v.note) + '</textarea>') +
-      '<div class="actions"><button class="btn primary" type="submit">' + (mode === 'setup' ? (b ? 'บันทึกงบ' : 'บันทึกงบ (ยังไม่เปิดใช้งบ)') : 'บันทึกร่าง') + '</button>' +
-      '<a class="btn" data-back href="' + (b ? '#/budget/' + b.id : mode === 'setup' ? '#/budgets' : '#/my-budgets') + '">ยกเลิก</a>' +
-      '</div></form>';
+    return '<div class="page-head"><div><h1>' + title + '</h1><div class="page-sub" id="budgetIntro" data-capex="' + esc(introFor('CAPEX')) + '" data-cbs="' + esc(introFor('CBS')) + '">' + introFor(v.type) + '</div></div>' +
+      (copyList.length ? '<div class="head-actions"><button type="button" class="btn" id="copyToggle">คัดลอกงบอื่น</button></div>' : '') + '</div>' +
+      '<ol class="stepper stepper-3">' + steps.map((label, i) => '<li class="' + (i === 0 ? 'current' : '') + '"><span>' + (i + 1) + '</span>' + label + '</li>').join('') + '</ol>' +
+      copyPanel + copyNote +
+      '<div id="formError"></div>' +
+      '<form id="budgetForm" class="budget-form" data-id="' + esc(id || '') + '" data-mode="' + mode + '">' +
+      '<div class="detail-layout"><div class="detail-main form-main">' + card1 + card2 + '</div>' + side + '</div>' + bar + '</form>';
+  }
+
+  /** ช่องบังคับที่ยังขาดในฟอร์มสร้างงบ */
+  function budgetFormMissing(f) {
+    const e = f.elements;
+    const m = [];
+    const type = (f.querySelector('[name="type"]:checked') || {}).value;
+    const structure = (f.querySelector('[name="structure"]:checked') || {}).value;
+    if (!filled(e.code)) m.push(type === 'CBS' ? 'Opex ID (รหัสโครงการ)' : 'Capex ID (รหัสโครงการ)');
+    if (!filled(e.name)) m.push('ชื่อโครงการ');
+    if (!filled(e.company)) m.push('บริษัท');
+    if (!filled(e.department)) m.push('หน่วยงานที่ขอ');
+    // ช่องเลือกที่ข้อมูลหลักยังว่าง (ยังไม่ได้ใส่ตัวเลือก) ไม่บังคับ
+    const hasOpts = (el) => el && el.options && el.options.length > 1;
+    if (hasOpts(e.priorityGroup) && !filled(e.priorityGroup)) m.push('กลุ่ม Priority');
+    if (type === 'CAPEX' && hasOpts(e.investGroup) && !filled(e.investGroup)) m.push('กลุ่ม Priority การลงทุน');
+    if (!filled(e.fiscalYear)) m.push(type === 'CBS' ? 'ปีงบประมาณ' : 'ปีที่ลงทุน');
+    if (hasOpts(e.financeOwner) && !filled(e.financeOwner)) m.push('เจ้าของฝ่ายการเงิน');
+    if (f.dataset.mode === 'setup' && !filled(e.ownerId)) m.push('Owner (Business เจ้าของงบ)');
+    if (structure === 'project') {
+      if (!(Number(e.projAmount.value) > 0)) m.push('วงเงิน (รวม VAT)');
+    } else {
+      const rows = Array.from(f.querySelectorAll('#itemRows tr')).map((tr) => ({
+        code: filled(tr.querySelector('[name="itCode"]')), dotted: String(tr.querySelector('[name="itCode"]').value).includes('.'),
+        name: filled(tr.querySelector('[name="itName"]')), amount: Number(tr.querySelector('[name="itAmount"]').value || 0)
+      })).filter((r) => r.code || r.name || r.amount);
+      if (!rows.length) m.push('รายการย่อยอย่างน้อย 1 รายการ');
+      else {
+        if (rows.some((r) => !r.code || !r.name)) m.push('รหัสและชื่อรายการทุกแถว');
+        if (rows.some((r) => !(r.amount > 0))) m.push('วงเงินทุกรายการ');
+        if (type === 'CBS' && rows.some((r) => r.dotted)) m.push('รหัส Item หลักต้องไม่มีจุด (Item ย่อยเพิ่มภายหลัง)');
+      }
+    }
+    return m;
   }
 
   function bindBudgetForm() {
     const form = document.getElementById('budgetForm');
     if (!form) return;
+    const toggle = document.getElementById('copyToggle');
+    if (toggle) toggle.addEventListener('click', () => { const pnl = document.getElementById('copyPanel'); pnl.hidden = !pnl.hidden; if (!pnl.hidden) document.getElementById('copyFrom').focus(); });
     const copyBtn = document.getElementById('copyBtn');
     if (copyBtn) {
       const copySel = document.getElementById('copyFrom');
@@ -1415,71 +1428,50 @@
         go('#/budget/new?copy=' + copySel.value);
       });
     }
-    const typeSel = form.elements.type;
-    const curType = () => typeSel.value;
-
-    const recalc = () => {
-      // CAPEX
-      let capex = 0;
-      form.querySelectorAll('#capexRows input[name="itAmount"]').forEach((el) => { capex += Number(el.value || 0); });
-      form.querySelector('[data-total="capex"]').textContent = money(capex);
-      // CBS: ยอดรวมของ Item หลัก (รวม VAT)
-      let cbs = 0;
-      form.querySelectorAll('#cbsRows tr').forEach((tr) => {
-        const amt = Number(tr.querySelector('[name="itAmount"]').value || 0);
-        cbs += amt + (tr.querySelector('[name="itVat"]').checked ? round2(amt * VAT_RATE) : 0);
-      });
-      form.querySelector('[data-total="cbs"]').textContent = money(cbs);
-      const gt = document.getElementById('govTotal');
-      if (gt) {
-        const st = (form.querySelector('[name="structure"]:checked') || {}).value;
-        gt.textContent = money(st === 'project' ? Number(form.elements.projAmount.value || 0) : curType() === 'CBS' ? cbs : capex);
-      }
-    };
+    const curType = () => (form.querySelector('[name="type"]:checked') || {}).value || 'CAPEX';
     // CAPEX / OPEX: แยกรายการ หรือ งบรวมทั้งโครงการ (ของบโดยยังไม่มีรายละเอียด Item)
-    const curStructure = () => form.querySelector('[name="structure"]:checked').value;
+    const curStructure = () => (form.querySelector('[name="structure"]:checked') || {}).value || 'items';
+    const tbody = document.getElementById('itemRows');
+    const recalc = () => {
+      let sum = 0;
+      let n = 0;
+      Array.from(tbody.rows).forEach((tr) => {
+        sum += Number(tr.querySelector('[name="itAmount"]').value || 0);
+        if (tr.querySelector('[name="itCode"]').value.trim() || tr.querySelector('[name="itName"]').value.trim()) n += 1;
+      });
+      document.getElementById('itemsTotal').textContent = money(sum);
+      const project = curStructure() === 'project';
+      document.getElementById('govTotal').textContent = money(project ? Number(form.elements.projAmount.value || 0) : sum);
+      document.getElementById('sumType').textContent = TYPE_SHORT[curType()];
+      document.getElementById('sumYear').textContent = form.elements.fiscalYear.value || '-';
+      document.getElementById('sumItems').textContent = project ? 'งบรวมทั้งโครงการ' : n + ' รายการ';
+    };
     const sync = () => {
       const t = curType();
       const st = curStructure();
-      form.querySelectorAll('[data-for], [data-structure]').forEach((el) => {
+      document.querySelectorAll('#budgetForm [data-for], #budgetForm [data-structure]').forEach((el) => {
         el.hidden = (el.dataset.for && el.dataset.for !== t) || (el.dataset.structure && el.dataset.structure !== st);
       });
       const introEl = document.getElementById('budgetIntro');
       if (introEl) introEl.textContent = t === 'CBS' ? introEl.dataset.cbs : introEl.dataset.capex;
       recalc();
     };
-    typeSel.addEventListener('change', sync);
-    form.querySelectorAll('[name="structure"]').forEach((el) => el.addEventListener('change', sync));
+    form.querySelectorAll('[name="type"], [name="structure"]').forEach((el) => el.addEventListener('change', sync));
     form.addEventListener('input', recalc);
-    form.addEventListener('change', (e) => {
-      // เลือก GL Code จากข้อมูลหลักแล้วเติมชื่อ GL ให้ ถ้ายังไม่ได้กรอก
-      if (e.target.matches('[name="itGl"]')) {
-        const g = db.master.glCodes.find((x) => x.code === e.target.value.trim());
-        const nameEl = e.target.closest('tr').querySelector('[name="itGlName"]');
-        if (g && nameEl && !nameEl.value.trim()) nameEl.value = g.name;
-      }
-      recalc();
-    });
+    form.addEventListener('change', recalc);
     form.addEventListener('click', (e) => {
-      if (e.target.matches('[data-remove-item]')) {
-        const tbody = e.target.closest('tbody');
+      if (e.target.closest('[data-remove-item]')) {
         if (tbody.rows.length > 1) e.target.closest('tr').remove();
+        else tbody.rows[0].querySelectorAll('input').forEach((el) => { el.value = ''; });
         recalc();
       }
-      const add = e.target.closest('[data-add-row]');
-      if (add) {
-        const kind = add.dataset.addRow;
-        const tbody = document.getElementById(kind + 'Rows');
+      if (e.target.closest('[data-add-row]')) {
+        // OPEX: เสนอรหัสถัดไปจากแถวสุดท้าย เช่น 3 → 4
         let code = '';
-        if (kind === 'cbs' && tbody.rows.length) {
-          // เสนอรหัสถัดไปจากแถวสุดท้าย เช่น 4.1 → 4.2
-          const last = tbody.rows[tbody.rows.length - 1].querySelector('[name="itCode"]').value.trim().split('.');
-          const n = Number(last[last.length - 1]);
-          if (!isNaN(n)) { last[last.length - 1] = String(n + 1); code = last.join('.'); }
-        }
-        tbody.insertAdjacentHTML('beforeend', kind === 'cbs'
-          ? cbsRow({ code, name: '', amount: '' }, false)
-          : capexRow({ code: '', name: '', amount: '' }, false));
+        const last = tbody.rows.length ? tbody.rows[tbody.rows.length - 1].querySelector('[name="itCode"]').value.trim() : '';
+        if (curType() === 'CBS' && /^\d+$/.test(last)) code = String(Number(last) + 1);
+        tbody.insertAdjacentHTML('beforeend', itemRow({ code, name: '', amount: '' }));
+        tbody.rows[tbody.rows.length - 1].querySelector(code ? '[name="itName"]' : '[name="itCode"]').focus();
         recalc();
       }
     });
@@ -1493,12 +1485,16 @@
       const mode = form.dataset.mode;
       const type = curType();
       const structure = curStructure();
+      // บันทึกแบบร่าง (Business): ต้องมีรหัส + ชื่อเท่านั้น · สร้างงบ: ต้องกรอกครบทุกช่องที่มี *
+      const asDraft = e.submitter && e.submitter.dataset.action === 'draft';
       const errors = [];
       const code = f.code.value.trim();
+      if (!code) errors.push('กรุณาระบุรหัสโครงการ');
+      if (!f.name.value.trim()) errors.push('กรุณาระบุชื่อโครงการ');
       if (db.budgets.some((b) => b.code === code && b.id !== id && b.state !== 'cancelled')) errors.push('รหัส "' + code + '" มีอยู่แล้ว');
-      if (mode === 'setup' && !f.ownerId.value) errors.push('กรุณาเลือก Business เจ้าของงบ');
+      const missing = budgetFormMissing(form);
 
-      const rows = structure === 'project' ? [] : Array.from(form.querySelectorAll('#' + (type === 'CBS' ? 'cbs' : 'capex') + 'Rows tr'));
+      const rows = structure === 'project' ? [] : Array.from(form.querySelectorAll('#itemRows tr'));
       const val = (tr, n) => tr.querySelector('[name="' + n + '"]');
       const items = rows.map((tr) => {
         const it = {
@@ -1508,14 +1504,10 @@
           amount: round2(val(tr, 'itAmount').value)
         };
         if (type === 'CAPEX') {
-          it.assetType = val(tr, 'itAsset').value;
+          it.assetType = tr.dataset.asset || assetTypeList()[0] || '';
         } else {
-          // Item หลักไม่มีจำนวน / หน่วย (กรอกที่ Item ย่อย)
-          it.qty = '';
-          it.unit = '';
-          it.vat = val(tr, 'itVat').checked ? round2(it.amount * VAT_RATE) : 0;
-          it.glCode = val(tr, 'itGl').value.trim();
-          it.glName = val(tr, 'itGlName').value.trim();
+          // วงเงินกรอกรวม VAT · Item หลักไม่มีจำนวน / หน่วย (กรอกที่ Item ย่อย) · GL เดิมเก็บไว้ (ฝ่ายบัญชีใส่ / แก้ได้ที่หน้า GL)
+          Object.assign(it, { qty: '', unit: '', vat: 0, glCode: tr.dataset.gl || '', glName: tr.dataset.glName || '' });
         }
         return it;
       }).filter((it) => it.code || it.name || it.amount);
@@ -1523,11 +1515,12 @@
         // งบรวมโครงการ = รายการเดียวที่เป็นตัวโครงการ
         const old = existing && existing.structure === 'project' ? existing.items[0] : null;
         items.push(Object.assign({ id: old ? old.id : '', code: code || '-', name: 'งบรวมทั้งโครงการ', amount: round2(f.projAmount.value), vat: 0,
-          qty: '', unit: '', glCode: '', glName: '' }, type === 'CAPEX' ? { assetType: f.projAsset.value } : {}));
+          qty: '', unit: '', glCode: '', glName: '' }, type === 'CAPEX' ? { assetType: (old && old.assetType) || assetTypeList()[0] || '' } : {}));
       }
 
-      if (!items.length) errors.push('ต้องมีรายการอย่างน้อย 1 รายการ');
-      if (items.some((it) => !it.code || !it.name)) errors.push('กรุณากรอกรหัสและชื่อรายการให้ครบทุกแถว');
+      if (!asDraft && !items.length) errors.push('ต้องมีรายการอย่างน้อย 1 รายการ');
+      if (!asDraft && items.some((it) => !it.code || !it.name)) errors.push('กรุณากรอกรหัสและชื่อรายการให้ครบทุกแถว');
+      if (!asDraft && missing.length) errors.push('กรอกให้ครบก่อน: ' + missing.join(' · '));
       const dup = items.map((it) => it.code).filter((c, i, arr) => c && arr.indexOf(c) !== i);
       if (dup.length) errors.push('รหัสรายการซ้ำ: ' + uniq(dup).join(', '));
       const draft = { type, items };
@@ -1561,12 +1554,13 @@
         priorityGroup: f.priorityGroup.value,
         investGroup: type === 'CAPEX' ? f.investGroup.value : '',
         priorityReason: f.priorityReason.value.trim(),
-        financeOwner: f.financeOwner.value.trim()
+        financeOwner: f.financeOwner.value.trim(),
+        incomplete: asDraft && missing.length > 0
       };
       data.group = f.group.value.trim();
       const at = new Date().toISOString();
       let target;
-      if (mode === 'setup') data.meeting = { date: f.meetingDate.value, no: f.meetingNo.value.trim(), note: '', by: type === 'CBS' && f.meetingBy ? f.meetingBy.value.trim() : '' };
+      if (mode === 'setup') data.meeting = existing && existing.meeting ? existing.meeting : { date: '', no: '', note: '', by: '' };
       if (existing) {
         target = existing;
         Object.assign(target, data, { updatedAt: at, updatedBy: me().id });
@@ -1584,7 +1578,8 @@
       }
       save();
       setFlash('success', mode === 'setup' ? 'บันทึกงบ ' + code + ' แล้ว — รอ ' + userName(target.ownerId) + ' ขอดำเนินการใช้งบ' + (type === 'CAPEX' ? ' (ทำ Memo ให้ผู้บริหารเซ็น)' : '')
-        : 'บันทึกร่าง ' + code + ' แล้ว — พิมพ์แบบฟอร์ม' + (type === 'CBS' ? 'เสนอผู้บริหาร' : 'เข้าที่ประชุม') + 'ได้จากหน้ารายละเอียด เมื่อได้' + (type === 'CBS' ? 'เอกสารอนุมัติ' : 'มติ') + 'แล้วแนบหลักฐานและส่งให้ผู้คุมงบ');
+        : asDraft ? 'บันทึกแบบร่าง ' + code + ' แล้ว' + (data.incomplete ? ' — ยังกรอกไม่ครบ กลับมาแก้ไขให้ครบแล้วกด "สร้างงบ" ก่อนส่งอนุมัติ' : '')
+        : 'สร้างงบ ' + code + ' แล้ว — พิมพ์แบบฟอร์ม' + (type === 'CBS' ? 'เสนอผู้บริหาร' : 'เข้าที่ประชุม') + 'ได้จากหน้ารายละเอียด เมื่อได้' + (type === 'CBS' ? 'เอกสารอนุมัติ' : 'มติ') + 'แล้วแนบหลักฐานและส่งให้ผู้คุมงบ');
       go('#/budget/' + target.id);
     });
   }
@@ -1711,7 +1706,8 @@
       actions.push('<a class="btn" href="#/change/new/' + b.id + '">ขอเพิ่มงบ</a>');
     }
     if (editable) actions.push('<a class="btn" href="#/budget/' + b.id + '/edit">แก้ไขร่าง</a>');
-    if (b.type === 'CBS' && own && can('budget.create') && state !== 'cancelled') actions.push('<a class="btn" href="#/budget/new?copy=' + b.id + '">คัดลอกเป็นโครงการใหม่</a>');
+    // คัดลอกเป็นงบใหม่: Business เจ้าของงบ (ทุกประเภท) · ผู้คุมงบ (ทุกงบ — ลงให้ Business)
+    if (state !== 'cancelled' && ((own && can('budget.create')) || (!can('budget.create') && can('budget.manage')))) actions.push('<a class="btn" href="#/budget/new?copy=' + b.id + '">คัดลอกเป็นงบใหม่</a>');
     const setupEdit = b.setup && waitingOpen(b) && can('budget.manage');
     if (setupEdit) actions.push('<a class="btn" href="#/budget/' + b.id + '/edit">แก้ไขงบ</a>');
     if (b.setup && b.openMemo && b.type === 'CAPEX' && (own || canViewAll())) actions.push('<a class="btn" href="#/budget/' + b.id + '/memo' + (canEditOpenMemo(b) ? '' : '?view=1') + '">Memo ขอดำเนินการใช้งบ</a>');
@@ -1838,7 +1834,9 @@
     // ---- หลักฐานการอนุมัติ (CAPEX: มติที่ประชุม · CBS: เอกสารอนุมัติผู้บริหาร)
     const ap = apprOf(b.type);
     let evidence = '<h2>' + ap.title + ' / หลักฐานการอนุมัติ</h2><section class="card evidence-card">';
-    if (editable) {
+    if (editable && b.incomplete) {
+      evidence += '<div class="alert warn">ร่างนี้ยังกรอกไม่ครบ — <a href="#/budget/' + b.id + '/edit">แก้ไขร่าง</a> ให้ครบแล้วกด "บันทึกและสร้างงบ" ก่อน จึงจะแนบหลักฐานและส่งอนุมัติได้</div>';
+    } else if (editable) {
       evidence += '<form id="submitBudget" data-id="' + b.id + '"><div class="form-grid">' +
         '<label class="field"><span>' + ap.date + '</span><input name="meetingDate" type="date" value="' + esc((b.meeting && b.meeting.date) || '') + '"></label>' +
         '<label class="field"><span>' + ap.no + '</span><input name="meetingNo" placeholder="' + ap.noEx + '" value="' + esc((b.meeting && b.meeting.no) || '') + '"></label>' +
@@ -5959,7 +5957,7 @@
       ['ใช้งบ', 'รายการของงบรวมโครงการ', 'งบที่ไม่มี Item (CAPEX / OPEX) ตอนขอเบิกพิมพ์ชื่อรายการเอง ไม่ต้องเลือกหมวด · ถ้าชื่อตรงกับหมวดค่าใช้จ่ายในข้อมูลหลัก OPEX จะได้ GL ตั้งต้นของหมวดนั้น'],
       ['OPEX', 'Item ของงบ OPEX', 'ต้องมี Item เสมอ (ไม่มีงบรวมทั้งโครงการ) · Item หลัก (1, 2, 3) กำหนดตอนตั้งงบพร้อมวงเงิน ไม่มีจำนวน/หน่วย · Item ย่อยได้ 3 ระดับ (1 → 1.1 → 1.1.1) เพิ่มได้เรื่อย ๆ หลังงบเปิดใช้แล้ว · รหัสโครงการและรหัส Item ผู้สร้างงบตั้งเอง โดย Business เจ้าของงบหรือผู้คุมงบ (ไม่ต้องอนุมัติซ้ำ ยอดงบรวมไม่เปลี่ยน)'],
       ['OPEX', 'วงเงินของ Item ย่อย', 'เงื่อนไขเดียว: รวมกันต้องไม่เกินวงเงิน Item หลัก (ถ้า 1.1 กำหนดวงเงินไว้ 1.1.x ต้องรวมไม่เกิน 1.1 ด้วย เพื่อให้ยอดคงเหลือสอดคล้องกัน) · จะกำหนดหรือไม่กำหนดวงเงินของ Item ย่อยก็ได้ (ไม่กำหนด = ใช้วงเงินของ Item แม่) · จำนวน/หน่วย กรอกที่ Item ย่อย · Item ย่อยที่กำหนดวงเงินถูกตรวจทั้งวงเงินตัวเองและวงเงิน Item หลัก · Item ย่อยที่มีการขอใช้แล้ว แก้รหัส/ลบไม่ได้'],
-      ['OPEX', 'คัดลอกจากโครงการก่อนหน้า', 'Business ที่สร้างงบ OPEX ใหม่เลือกโครงการ OPEX ของตนเองเป็นต้นแบบได้ (ปุ่ม "คัดลอก" บนฟอร์ม หรือ "คัดลอกเป็นโครงการใหม่" ในหน้างบ): ดึงบริษัท หน่วยงาน กลุ่มงบ ชื่อ หมายเหตุ ปีงบ และ Item หลักพร้อมวงเงิน / VAT / GL · รหัสโครงการกรอกใหม่ · ไม่คัดลอก Item ย่อย / เอกสารอนุมัติ / ไฟล์แนบ · ใช้ยอดปัจจุบันของโครงการเดิม (รวมที่ปรับแล้ว)'],
+      ['ตั้งงบ', 'คัดลอกงบอื่น', 'หน้าสร้างงบมีปุ่ม "คัดลอกงบอื่น" (และปุ่ม "คัดลอกเป็นงบใหม่" ในหน้างบ) — Business คัดลอกได้จากงบของตนเองทั้ง CAPEX และ OPEX · ผู้คุมงบคัดลอกได้จากทุกงบ · ดึงประเภท บริษัท หน่วยงาน ข้อมูล Priority ชื่อ และรายการหลักพร้อมวงเงิน · รหัสโครงการต้องกรอกใหม่ · ไม่คัดลอก Item ย่อย / ข้อมูลอนุมัติ / ไฟล์แนบ'],
       ['OPEX', 'ขั้นตอนการใช้งบ OPEX', 'เหมือน CAPEX ทุกขั้น: ขอเบิกใช้งบ (4 ประเภท) → ผู้คุมงบตรวจสอบ → ตัดงบตามประเภท → ปิดยอดคืนส่วนต่าง · ขอเกินงบรายการต้องมี Note · ไม่ใช้ Memo'],
       ['OPEX', 'การอนุมัติงบ OPEX (ตั้งงบ / เพิ่มงบ)', 'ไม่เข้าบอร์ด — ให้ผู้บริหารอนุมัติ: แนบเอกสารอนุมัติ + เลขที่เอกสาร + ชื่อผู้บริหารที่อนุมัติ แล้วผู้คุมงบตรวจสอบและยืนยัน (ต้นแบบนี้ผู้บริหารอนุมัตินอกระบบ แล้วแนบหลักฐาน)'],
       ['OPEX', 'ผู้บริหารที่อนุมัติ ต้องเป็นผู้ใช้ในระบบไหม', 'ไม่ — พิมพ์ชื่อ/ตำแหน่งและแนบหลักฐาน (ถ้าต้องการให้ผู้บริหารกดอนุมัติในระบบ จะเพิ่มบทบาท "ผู้บริหาร" ภายหลัง)'],
@@ -6032,35 +6030,10 @@
     // ---- ฟอร์มตั้งงบ / นำเข้างบ
     const bf = document.getElementById('budgetForm');
     if (bf) {
-      markReq(bf, ['type', 'company', 'fiscalYear', 'code', 'name', 'department', 'ownerId', 'projAmount']);
-      markReqText(bf, 'thead th', /^(รหัส|รหัสรายการย่อย|ชื่อรายการ|รายการ|วงเงิน \(รวม VAT\)|ก่อน VAT)$/);
-      guard(bf, [{ btn: 'button[type="submit"]', missing: (f) => {
-        const e = f.elements;
-        const m = [];
-        if (!filled(e.code)) m.push(e.type.value === 'CBS' ? 'Opex ID (รหัสโครงการ)' : 'Capex ID (รหัสโครงการ)');
-        if (!filled(e.name)) m.push('ชื่อโครงการ');
-        if (!filled(e.department)) m.push('หน่วยงานที่ขอ');
-        if (!filled(e.fiscalYear)) m.push(e.type.value === 'CBS' ? 'ปีงบประมาณ' : 'เฉลี่ยปีที่ลงทุน');
-        if (f.dataset.mode === 'setup' && !filled(e.ownerId)) m.push('Owner (Business เจ้าของงบ)');
-        const type = e.type.value;
-        const structure = (f.querySelector('[name="structure"]:checked') || {}).value;
-        if (structure === 'project') {
-          if (!(Number(e.projAmount.value) > 0)) m.push('วงเงินรวมทั้งโครงการ');
-        } else {
-          const rows = Array.from(f.querySelectorAll('#' + (type === 'CBS' ? 'cbs' : 'capex') + 'Rows tr')).map((tr) => ({
-            code: filled(tr.querySelector('[name="itCode"]')), dotted: String(tr.querySelector('[name="itCode"]').value).includes('.'), name: filled(tr.querySelector('[name="itName"]')),
-            amount: Number((tr.querySelector('[name="itAmount"]') || {}).value || 0), parent: (tr.querySelector('[name="itAmount"]') || {}).disabled
-          })).filter((r) => r.code || r.name || r.amount);
-          if (!rows.length) m.push('รายการอย่างน้อย 1 รายการ');
-          else {
-            if (rows.some((r) => !r.code || !r.name)) m.push('รหัสและชื่อรายการทุกแถว');
-            if (type === 'CAPEX' && rows.some((r) => !(r.amount > 0))) m.push('วงเงินของทุกรายการย่อย');
-            if (type === 'CBS' && rows.some((r) => r.dotted)) m.push('รหัส Item หลักต้องไม่มีจุด (Item ย่อยเพิ่มภายหลัง)');
-            if (type === 'CBS' && rows.some((r) => !(r.amount > 0))) m.push('วงเงินของ Item หลักทุกแถว');
-          }
-        }
-        return m;
-      } }]);
+      markReq(bf, ['company', 'fiscalYear', 'code', 'name', 'department', 'ownerId', 'projAmount', 'priorityGroup', 'investGroup', 'financeOwner']);
+      markReqText(bf, '.item-table thead th', /^(รหัสรายการย่อย|ชื่อรายการ|วงเงิน \(รวม VAT\))$/);
+      guard(bf, [{ btn: '[data-action="create"]', label: 'สร้างงบ', missing: (f) => budgetFormMissing(f) },
+        { btn: '[data-action="draft"]', label: 'บันทึกแบบร่าง', missing: (f) => [!filled(f.elements.code) && 'รหัสโครงการ', !filled(f.elements.name) && 'ชื่อโครงการ'] }], '.form-bar .bar-hint');
     }
 
     // ---- แนบมติ / เอกสารอนุมัติแล้วส่งตรวจ (งบ และคำขอเพิ่มงบ)
