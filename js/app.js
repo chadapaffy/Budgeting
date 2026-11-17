@@ -1395,6 +1395,7 @@
     history: '<path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/>',
     master: '<ellipse cx="12" cy="5.5" rx="7.5" ry="2.5"/><path d="M4.5 5.5v6.5c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5V5.5"/><path d="M4.5 12v6.5c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5V12"/>',
     log: '<rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M12 15h5"/>',
+    roles: '<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/><path d="M9 12l2.2 2.2L15.5 10"/>',
     admin: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.3-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/>',
     export: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 12l6 6M15 12l-6 6"/>',
     report: '<path d="M4 20V4"/><path d="M4 20h16"/><rect x="7.5" y="11" width="3" height="6" rx=".8"/><rect x="12.5" y="7" width="3" height="10" rx=".8"/><rect x="17.5" y="13" width="2.5" height="4" rx=".8"/>',
@@ -1414,19 +1415,31 @@
     if (tabs.length) links.push(['tasks', '#/tasks', 'งานทั้งหมด' + count(tabs.reduce((n, t) => n + (t.act ? t.n : 0), 0)), ['#/tasks', '#/approvals', '#/po', '#/cuts', '#/accounting', '#/payments']]);
     if (canViewAll() || can('request.create')) links.push(['requests', '#/requests', 'รายการเบิกใช้งบ', ['#/requests', '#/request/', '#/doc/']]);
     if (isWorker(u)) links.push(['history', '#/history', 'ประวัติการทำรายการ', ['#/history']]);
-    if (adminTabsFor().length) {
-      links.push(['admin', adminTabsFor()[0][1], 'Admin' + count(REMOTE ? adminCounts.pending : adminResetCount()), ['#/admin', '#/master', '#/log']]);
-      if (route.startsWith('#/master')) {
-        const cur = route.split('/')[2] || MASTER_NAV[0][0];
-        MASTER_NAV.forEach(([k, t]) => links.push(['sub', '#/master/' + k, t, [], k === cur]));
-      }
-    }
     if (can('data.export')) links.push(['export', '#/export', 'ส่งออกข้อมูล (Excel)', ['#/export']]);
     links.push(['report', '#/dashboard', 'รายงาน', ['#/dashboard']]);
+    // ผู้ดูแลระบบ: ต่อจากเมนูรายงาน (แสดงเมนูละรายการตามสิทธิ์)
+    if (can('user.manage') || can('master.manage') || can('log.view')) {
+      links.push(['group', '', 'ผู้ดูแลระบบ']);
+      const onAdmin = route.startsWith('#/admin');
+      const rolesTab = /(^|&)tab=roles(&|$)/.test(location.hash.split('?')[1] || '');
+      if (can('user.manage')) {
+        links.push(['admin', '#/admin', 'ผู้ใช้' + count(REMOTE ? adminCounts.pending : adminResetCount()), ['#/admin'], undefined, onAdmin && !rolesTab]);
+        links.push(['roles', '#/admin?tab=roles', 'บทบาทและสิทธิ์', ['#/admin'], undefined, onAdmin && rolesTab]);
+      }
+      if (can('master.manage')) {
+        links.push(['master', '#/master', 'ข้อมูลหลัก', ['#/master']]);
+        if (route.startsWith('#/master')) {
+          const cur = route.split('/')[2] || MASTER_NAV[0][0];
+          MASTER_NAV.forEach(([k, t]) => links.push(['sub', '#/master/' + k, t, [], k === cur]));
+        }
+      }
+      if (can('log.view')) links.push(['log', '#/log', 'Log การทำงาน', ['#/log']]);
+    }
     let activeDone = false;
-    document.getElementById('nav').innerHTML = links.map(([icon, href, text, prefixes, subActive]) => {
+    document.getElementById('nav').innerHTML = links.map(([icon, href, text, prefixes, subActive, override]) => {
+      if (icon === 'group') return '<div class="nav-label nav-group">' + text + '</div>';
       if (icon === 'sub') return '<a class="sub' + (subActive ? ' sub-active' : '') + '" href="' + href + '"' + (subActive ? ' aria-current="page"' : '') + '><span>' + text + '</span></a>';
-      const active = !activeDone && prefixes.some((p) => route.startsWith(p));
+      const active = override !== undefined ? override : (!activeDone && prefixes.some((p) => route.startsWith(p)));
       if (active) activeDone = true;
       return '<a href="' + href + '"' + (active ? ' class="active" aria-current="page"' : '') + '>' + navIcon(icon) + '<span>' + text + '</span></a>';
     }).join('');
@@ -5514,7 +5527,7 @@
       '<template>' + masterRow(sec, {}, true) + '</template>' +
       '<div class="actions"><button type="button" class="btn" data-m-add>+ เพิ่ม</button><button class="btn primary" type="submit">บันทึก' + sec.title + '</button></div></form></section>').join('');
 
-    return '<div class="page-head"><div><h1>' + esc(navTitle) + '</h1><div class="page-sub">ข้อมูลหลัก — ค่าที่ใช้เป็นตัวเลือกในฟอร์มและรายงาน</div></div></div>' + takeFlash() + adminTabsHtml('master') +
+    return '<div class="page-head"><div><h1>' + esc(navTitle) + '</h1><div class="page-sub">ข้อมูลหลัก — ค่าที่ใช้เป็นตัวเลือกในฟอร์มและรายงาน</div></div></div>' + takeFlash() +
       '<div id="formError"></div><div class="form-main">' + sections +
       '</div>';
   }
@@ -5593,20 +5606,7 @@
 
   /** บทบาทที่เห็นงบ/งานของคนอื่น (ต้องกำหนดบริษัทที่ดูได้) */
   const roleSeesWork = (role) => ['budget.view_all', 'budget.manage', 'budget.verify', 'request.decide', 'cut.record', 'po.record'].some((k) => (DEMO_ROLE_PERMS[role] || []).includes(k));
-  /** แท็บของหน้า Admin (แสดงตามสิทธิ์) — [key, href, ข้อความ] */
-  function adminTabsFor() {
-    const t = [];
-    if (can('user.manage')) t.push(['users', '#/admin', 'ผู้ใช้'], ['roles', '#/admin?tab=roles', 'บทบาทและสิทธิ์']);
-    if (can('master.manage')) t.push(['master', '#/master', 'ข้อมูลหลัก']);
-    if (can('log.view')) t.push(['log', '#/log', 'Log การทำงาน']);
-    return t;
-  }
   const adminResetCount = () => (!REMOTE && can('user.manage') ? USERS.filter((u) => accountState(u).key === 'reset_requested').length : 0);
-  function adminTabsHtml(active) {
-    return '<nav class="tabs" aria-label="หมวด Admin">' + adminTabsFor().map(([k, href, label]) =>
-      '<a href="' + href + '"' + (k === active ? ' class="active" aria-current="page"' : '') + '>' + label +
-      (k === 'users' && adminResetCount() ? ' <span class="tab-count">(' + adminResetCount() + ' ขอรีเซ็ต)</span>' : '') + '</a>').join('') + '</nav>';
-  }
 
   function viewAdmin(params) {
     if (!can('user.manage')) return '<div class="alert error">ไม่มีสิทธิ์จัดการผู้ใช้และสิทธิ์</div>';
@@ -6265,8 +6265,10 @@
 
   function viewAdminDemo(params) {
     const tab = params && params.get('tab') === 'roles' ? 'roles' : 'users';
-    return '<div class="page-head"><div><h1>Admin</h1><div class="page-sub">จัดการผู้ใช้ บทบาท และสิทธิ์ · ข้อมูลหลัก · Log การทำงาน — ' + (AUTH_REMOTE ? 'บัญชีและสิทธิ์เก็บบนเซิร์ฟเวอร์ (ข้อมูลหลักและ Log ยังเก็บในเบราว์เซอร์นี้)' : 'โหมดทดลองเก็บในเบราว์เซอร์นี้เท่านั้น') + '</div></div></div>' +
-      takeFlash() + adminTabsHtml(tab) + '<div id="formError"></div><div id="adminBox">' + (tab === 'roles' ? viewAdminRoles() : viewAdminUsers()) + '</div>';
+    const store = AUTH_REMOTE ? 'บัญชีและสิทธิ์เก็บบนเซิร์ฟเวอร์' : 'โหมดทดลองเก็บในเบราว์เซอร์นี้เท่านั้น';
+    return '<div class="page-head"><div><h1>' + (tab === 'roles' ? 'บทบาทและสิทธิ์' : 'ผู้ใช้') + '</h1><div class="page-sub">' +
+      (tab === 'roles' ? 'กำหนดว่าแต่ละบทบาททำอะไรได้บ้าง · สร้างบทบาทเพิ่มได้ — ' : 'เพิ่ม แก้ไข เปิด/ปิดใช้งานผู้ใช้ และรีเซ็ตรหัสผ่าน — ') + store + '</div></div></div>' +
+      takeFlash() + '<div id="formError"></div><div id="adminBox">' + (tab === 'roles' ? viewAdminRoles() : viewAdminUsers()) + '</div>';
   }
 
   function viewAdminUsers() {
@@ -6450,7 +6452,7 @@
     const who = params.get('by') || '';
     const list = (db.log || []).slice().reverse().filter((x) => (!who || x.by === who) &&
       (!q || (x.action + ' ' + x.ref + ' ' + x.detail).toLowerCase().includes(q)));
-    return '<div class="page-head"><div><h1>Log การทำงาน</h1><div class="page-sub">บันทึกทุกการกระทำในระบบ เพิ่มได้อย่างเดียว แก้หรือลบไม่ได้</div></div></div>' + adminTabsHtml('log') +
+    return '<div class="page-head"><div><h1>Log การทำงาน</h1><div class="page-sub">บันทึกทุกการกระทำในระบบ เพิ่มได้อย่างเดียว แก้หรือลบไม่ได้</div></div></div>' +
       '<form id="logFilter" class="admin-filters"><label class="input-wrap search">' + ICON_SEARCH + '<input name="q" type="search" placeholder="ค้นหาการกระทำ เลขที่ รายละเอียด" value="' + esc(params.get('q') || '') + '"></label>' +
       '<div class="select-wrap"><select name="by">' + opt('', 'ผู้ใช้: ทั้งหมด', who) + USERS.map((x) => opt(x.id, 'ผู้ใช้: ' + x.name, who)).join('') + '</select></div><button class="btn" type="submit">กรอง</button></form>' +
       '<div class="table-wrap"><table><thead><tr><th>เวลา</th><th>ผู้ใช้</th><th>การกระทำ</th><th>เรื่อง</th><th>รายละเอียด</th></tr></thead><tbody>' +

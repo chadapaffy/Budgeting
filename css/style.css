@@ -1187,3 +1187,5 @@ button.link { color: var(--brand); }
 .viewer[hidden] { display: none; }
 .viewer-panel.is-form { width: min(680px, 100%); height: auto; max-height: 94vh; }
 .viewer-form { padding: var(--s-4) var(--s-5) var(--s-5); overflow: auto; }
+/* หัวกลุ่มในเมนูซ้าย (เช่น ผู้ดูแลระบบ) — ใช้ .nav-label เดิม เว้นระยะด้านบนเท่านั้น */
+#nav .nav-label.nav-group { margin-top: var(--s-5); }
