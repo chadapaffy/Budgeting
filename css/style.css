@@ -1148,3 +1148,26 @@ button.link { color: var(--brand); }
 .gov-set .out { min-height: var(--control-h); display: flex; align-items: center; justify-content: flex-end; font-variant-numeric: tabular-nums; }
 .gov-set .out.left { justify-content: flex-start; }
 .group-pick > .group-title { flex: 0 1 360px; min-width: 0; }
+/* ---- หน้าสร้างงบประมาณ */
+.stepper.stepper-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: var(--s-4); }
+.type-pick { margin: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); flex: 0 1 360px; }
+.type-pick .choice-opt { padding: var(--s-2) var(--s-3); }
+.budget-form .section-head { align-items: flex-start; flex-wrap: wrap; }
+.form-divider { height: 1px; background: var(--line); margin: var(--s-2) 0 var(--s-4); }
+.item-table .c-code { width: 28%; }
+.item-table .c-amt { width: 10rem; }
+.item-table .c-del { width: 2.5rem; }
+.total-card .sum-box { margin: var(--s-2) 0 var(--s-4); padding: var(--s-3) var(--s-4); border-radius: var(--radius-sm); background: var(--primary-soft); }
+.total-card .sum-box > span, .total-card .sum-box small { font-size: var(--fs-xs); color: var(--muted); }
+.sum-state { color: var(--warn); font-weight: 600; }
+.budget-form .detail-side textarea { width: 100%; }
+.form-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-3); margin-top: var(--s-4); padding: var(--s-3) var(--s-5); }
+.form-bar .bar-hint { margin: 0; font-size: var(--fs-sm); }
+.form-bar .actions { margin: 0; }
+.form-bar .guard-hint { flex-basis: 100%; order: 3; margin: 0; }
+@media (max-width: 720px) { .type-pick { flex-basis: 100%; } }
+@media (min-width: 721px) { form .row.row-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.type-pick { flex-basis: 300px; }
+.budget-form .detail-layout > * { min-width: 0; }
+@media (max-width: 720px) { .item-group .item-table, .groups-box .item-table { min-width: 420px; } }
+.type-pick.wide { flex-basis: 440px; }
