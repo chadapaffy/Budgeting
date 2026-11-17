@@ -109,11 +109,6 @@
   const MEMO_MODES = [['', 'ไม่ต้องใช้'], ['cross', 'ใช้เงินข้ามบริษัทกับบริษัทนี้']];
   /** เกณฑ์ตั้งต้น: งบของ PCC ที่บริษัทอื่นมาใช้ (หรือ PCC ออกเงินให้งบของบริษัทอื่น) ต้องทำ Memo */
   const memoDefaultFor = (code) => (code === 'PCC' ? 'cross' : '');
-  /** ผู้ลงนามใน Memo ตั้งต้น (ข้อความตัวอย่างทั่วไป ใส่ชื่อ/ตำแหน่งจริงที่ข้อมูลหลัก > ผู้ลงนาม Memo) */
-  const MEMO_PARTY_SAMPLE = {
-    PBI: { to: 'ผู้บริหารสูงสุด PBI (ตัวอย่าง)', cc: 'บัญชี / การเงิน PBI (ตัวอย่าง)', reviewer: 'ผู้บริหารฝ่ายการเงิน PBI (ตัวอย่าง)', signer: 'กรรมการผู้จัดการ PBI (ตัวอย่าง)' },
-    PCC: { to: 'ผู้บริหารสูงสุด PCC (ตัวอย่าง)', cc: 'บัญชี / การเงิน PCC (ตัวอย่าง)', reviewer: 'ผู้บริหารฝ่ายการเงิน PCC (ตัวอย่าง)', signer: 'กรรมการผู้จัดการ PCC (ตัวอย่าง)' }
-  };
   const TYPE_LABEL = { CAPEX: 'งบลงทุน (CAPEX)', CBS: 'งบดำเนินงาน (OPEX)' };
   /** ชื่อย่อที่แสดง: รหัสภายใน 'CBS' แสดงเป็น OPEX */
   const TYPE_SHORT = { CAPEX: 'CAPEX', CBS: 'OPEX' };
@@ -165,10 +160,6 @@
     reimburse: { label: 'พนักงานสำรองจ่าย', short: 'สำรองจ่าย', cut: 'ตัดงบเมื่อจ่ายคืนพนักงานตามใบเสร็จ', who: 'ผู้คุมงบ' },
     direct: { label: 'จ่ายตรงให้ Supplier', short: 'จ่ายตรง', cut: 'ตัดงบเมื่อจ่ายเงินให้ Supplier', who: 'ผู้คุมงบ', hint: 'ค่าแรง · จ้างเหมา · จ่ายรายวัน · ค่าน้ำมัน · Stock' }
   };
-  const DEFAULT_CATEGORIES = [
-    { name: 'ค่าแรง', gl: '520101' }, { name: 'ค่าวัสดุ / อุปกรณ์', gl: '510101' }, { name: 'ค่าจ้างเหมา', gl: '520201' },
-    { name: 'ค่าเครื่องจักร / สินทรัพย์', gl: '' }, { name: 'ค่าขนส่ง', gl: '540101' }, { name: 'ค่าเช่า', gl: '530101' }, { name: 'อื่นๆ', gl: '' }
-  ];
   /** โหมดทดลองเก็บไฟล์แนบในเบราว์เซอร์ จึงจำกัดขนาดไว้เล็ก (ระบบจริงเก็บใน Storage ได้ใหญ่กว่า) */
   const ATTACH_MAX = 400 * 1024;
   /** กลุ่ม Priority ตั้งต้น (ตามไฟล์ Capex / Opex Governance Framework) — เพิ่ม / แก้ได้ที่ข้อมูลหลัก */
@@ -199,8 +190,6 @@
     const groups = list('groups').slice();
     const assetTypes = list('assetTypes').slice();
     ASSET_TYPES.forEach((t) => addBy(assetTypes, 'name', { name: t }));
-    const glCodes = list('glCodes').slice();
-    const expenseCategories = list('expenseCategories').length ? list('expenseCategories').slice() : DEFAULT_CATEGORIES.map((c) => Object.assign({}, c));
     const priorityGroups = list('priorityGroups').slice();
     if (!priorityGroups.length) DEFAULT_PRIORITY_GROUPS.forEach((n) => priorityGroups.push({ name: n }));
     const investGroups = list('investGroups').slice();
@@ -222,17 +211,12 @@
       addBy(groups, 'code', { code: b.group, name: DEFAULT_GROUP_NAMES[b.group] || '' });
       (b.items || []).forEach((it) => {
         if (b.type === 'CAPEX') addBy(assetTypes, 'name', { name: it.assetType });
-        else addBy(glCodes, 'code', { code: it.glCode, name: it.glName || '' });
       });
     });
     // ค่าเดิมแบบติ๊ก (true/false) หรือยังไม่ตั้ง → ใช้เกณฑ์ตั้งต้น "เฉพาะงบที่ไม่มี Item"
     // เกณฑ์ Memo แบบใหม่ (ใช้เงินข้ามบริษัท) — เปลี่ยนจากเกณฑ์เดิมครั้งเดียว แล้วปรับเองได้ที่ข้อมูลหลัก
     if (m.memoRule !== 2) companies.forEach((c) => { c.memo = memoDefaultFor(c.code); });
     companies.forEach((c) => { if (!MEMO_MODES.some(([v]) => v === c.memo)) c.memo = memoDefaultFor(c.code); });
-    const memoParties = list('memoParties').slice();
-    companies.forEach((c) => {
-      if (!memoParties.some((x) => x.code === c.code)) memoParties.push(Object.assign({ code: c.code, to: '', cc: '', reviewer: '', signer: '' }, MEMO_PARTY_SAMPLE[c.code] || {}));
-    });
     // ตัวเลือกตั้งต้นรุ่นใหม่ (ครั้งเดียว): เติมหน่วยงาน / กลุ่ม Priority / กลุ่ม Priority การลงทุน · เอากลุ่ม Priority ตั้งต้นเดิมที่ไม่อยู่ในรายการใหม่ออก ถ้ายังไม่มีงบใช้
     let prio = priorityGroups;
     if (m.listsV !== MASTER_LISTS_V) {
@@ -242,7 +226,7 @@
       DEFAULT_DEPARTMENTS.forEach((n) => addBy(departments, 'name', { name: n }));
       DEFAULT_INVEST_GROUPS.forEach((n) => addBy(investGroups, 'name', { name: n }));
     }
-    d.master = { companies, departments, groups, assetTypes, glCodes, expenseCategories, memoParties, priorityGroups: prio, investGroups, listGroups, suppliers, memoRule: 2, listsV: MASTER_LISTS_V };
+    d.master = { companies, departments, groups, assetTypes, priorityGroups: prio, investGroups, listGroups, suppliers, memoRule: 2, listsV: MASTER_LISTS_V };
     return d;
   }
   const companyMap = () => Object.fromEntries(db.master.companies.map((c) => [c.code, c.name]));
@@ -253,12 +237,9 @@
     optList(db.master.companies, 'code', (c) => c.code, selected) + '</select></div>';
   /** หลายคนคั่นด้วย ; หรือขึ้นบรรทัดใหม่ */
   const splitPeople = (v) => String(v || '').split(/\s*;\s*|\n/).map((x) => x.trim()).filter(Boolean);
-  /** ผู้รับ/ผู้ลงนามใน Memo ตั้งต้น: ของบริษัทที่ลงทุน (เรียน/สำเนา/ผู้ทบทวน/ผู้พิจารณา) และผู้ลงนามเสนอของบริษัทเจ้าของงบ */
-  function defaultMemoParties(b, investor) {
-    const list = db.master.memoParties || [];
-    const inv = list.find((x) => x.code === investor) || {};
-    const own = list.find((x) => x.code === b.company) || {};
-    return { to: splitPeople(inv.to), cc: splitPeople(inv.cc), reviewers: splitPeople(inv.reviewer), approvers: splitPeople(inv.to), proposer: String(own.signer || '').trim() };
+  /** ผู้รับ/ผู้ลงนามใน Memo: เริ่มว่าง — ผู้ทำ Memo กรอกเองในแบบฟอร์ม (ไม่มีข้อมูลหลักผู้ลงนามแล้ว) */
+  function defaultMemoParties() {
+    return { to: [], cc: [], reviewers: [], approvers: [], proposer: '' };
   }
   const investorCell = (code) => '<span class="nowrap">' + esc(code) + '</span>';
   const assetTypeList = () => db.master.assetTypes.map((x) => x.name);
@@ -524,7 +505,6 @@
     if (comps.some((c) => c.code === to)) m.companies = comps.filter((c) => c.code !== from);
     else comps.forEach((c) => { if (c.code === from) { c.code = to; c.name = String(c.name || '').split(from).join(to); } });
     const fix = (o, k) => { if (o && o[k] === from) o[k] = to; };
-    (m.memoParties || []).forEach((x) => fix(x, 'code'));
     (d.budgets || []).forEach((b) => { fix(b, 'company'); (b.items || []).forEach((it) => fix(it, 'investor')); });
     (d.requests || []).forEach((r) => (r.lines || []).forEach((l) => fix(l, 'investor')));
     (d.changes || []).forEach((c) => (c.lines || []).forEach((l) => fix(l, 'investor')));
@@ -2953,7 +2933,7 @@
       '<td><input name="siUnit" value="' + esc(it.unit || '') + '" aria-label="หน่วย"></td>' +
       '<td><input name="siAmount" type="number" min="0" step="0.01" class="right" value="' + esc(it.amount || '') + '" placeholder="ไม่กำหนด" aria-label="วงเงินก่อน VAT เว้นว่าง = ไม่กำหนด"></td>' +
       '<td class="center"><input name="siVat" type="checkbox"' + (Number(it.vat) > 0 ? ' checked' : '') + ' aria-label="VAT 7%"></td>' +
-      '<td><input name="siGl" list="glList" value="' + esc(it.glCode || '') + '" aria-label="GL Code"></td>' +
+      '<td><input name="siGl" value="' + esc(it.glCode || '') + '" aria-label="GL Code"></td>' +
       '<td class="nowrap">' + (lv === 1 ? '<button type="button" class="btn small" data-add-child title="เพิ่ม Item ย่อยระดับถัดไป (เช่น 1.1.1)">+ ย่อย</button> ' : '') +
       (locked ? '<span class="muted" title="มีการขอใช้แล้ว ลบไม่ได้">🔒</span>' : '<button type="button" class="btn small bad" data-remove-sub title="ลบ">×</button>') + '</td></tr>';
   }
@@ -2978,7 +2958,6 @@
     return '<div class="page-head"><div><h1>จัดการ Item ย่อย · ' + esc(b.code) + '</h1><div class="page-sub">' + esc(b.name) +
       ' — เพิ่ม Item ย่อยได้ 2 ระดับใต้ Item หลัก (1 → 1.1 → 1.1.1) และเพิ่มได้เรื่อย ๆ · เงื่อนไข: วงเงินรวมของ Item ย่อยต้องไม่เกิน Item หลัก · จะกำหนดวงเงินของ Item ย่อยหรือไม่ก็ได้ (เว้นว่าง = ใช้วงเงินของ Item แม่) · จำนวน / หน่วย กรอกที่ Item ย่อย</div></div></div>' +
       '<div id="formError"></div>' +
-      '<datalist id="glList">' + db.master.glCodes.map((g) => '<option value="' + esc(g.code) + '">' + esc(g.name) + '</option>').join('') + '</datalist>' +
       '<form id="subItemsForm" data-id="' + b.id + '"><div class="form-main">' + sections +
       '<div class="actions"><button class="btn primary" type="submit">บันทึก Item ย่อย</button><a class="btn" data-back href="#/budget/' + b.id + '">ยกเลิก</a></div></div>' +
       '<template id="subTpl">' + subItemRow(b, {}, false) + '</template></form>';
@@ -3099,8 +3078,7 @@
       const keepIds = new Set(b.items.filter((x) => depth(x) === 0).map((x) => x.id));
       const apply = (target, r) => {
         Object.assign(target, { code: r.code, name: r.name, qty: r.qty, unit: r.unit, amount: r.amount, vat: r.vat, glCode: r.glCode });
-        const g = db.master.glCodes.find((x) => x.code === r.glCode);
-        target.glName = g ? g.name : (target.glName || '');
+        target.glName = target.glName || '';
       };
       sections().forEach((sec) => {
         readRows(sec).forEach((r) => {
@@ -3755,20 +3733,14 @@
   function itemGl(b, it) {
     let n = it;
     while (n) {
-      if (n.glCode) return { code: n.glCode, name: n.glName || ((db.master.glCodes.find((g) => g.code === n.glCode) || {}).name || ''), own: n === it };
+      if (n.glCode) return { code: n.glCode, name: n.glName || '', own: n === it };
       n = b.type === 'CBS' ? parentOf(b, n) : null;
     }
     return { code: '', name: '', own: false };
   }
   /** GL ของบรรทัด: ที่บันทึกในบรรทัด หรือ GL ปัจจุบันของ Item (บัญชีใส่ทีหลัง) */
-  /** GL ตั้งต้นของหมวดค่าใช้จ่าย (ข้อมูลหลัก) */
-  const categoryGl = (name) => {
-    const c = (db.master.expenseCategories || []).find((x) => x.name === name);
-    const code = c && c.gl ? c.gl : '';
-    return { code, name: code ? ((db.master.glCodes.find((g) => g.code === code) || {}).name || name) : '' };
-  };
   const lineGl = (b, l) => (l.glCode ? { code: l.glCode, name: l.glName || '' }
-    : b.structure === 'project' && l.category ? categoryGl(l.category) : itemGl(b, itemById(b, l.itemId) || { code: '' }));
+    : b.structure === 'project' && l.category ? { code: '', name: '' } : itemGl(b, itemById(b, l.itemId) || { code: '' }));
   /** Item หลักของ OPEX ที่ยังไม่มี GL */
   const missingGl = (b) => (b.type === 'CBS' && b.structure !== 'project' ? b.items.filter((it) => isMainItem(b, it) && !it.glCode) : []);
   /** ฝ่ายบัญชี (ผู้คุมงบ) ใส่ / แก้ GL ได้ทุกเมื่อ ยกเว้นงบที่ยกเลิก */
@@ -3783,13 +3755,12 @@
       const ph = !it.glCode && inh.code ? 'ตาม Item แม่ (' + inh.code + ')' : '';
       return '<tr data-item="' + esc(it.id) + '" class="' + (isMainItem(b, it) ? 'parent-row' : '') + '"><td class="nowrap">' + esc(it.code) + '</td>' +
         '<td style="padding-left:' + (0.75 + depth(it) * 1.1) + 'rem">' + esc(it.name) + '</td>' +
-        '<td><input name="gl" list="glList" value="' + esc(it.glCode || '') + '" placeholder="' + esc(ph || (isMainItem(b, it) ? 'ยังไม่มี' : '')) + '" aria-label="GL Code ' + esc(it.code) + '"></td>' +
+        '<td><input name="gl" value="' + esc(it.glCode || '') + '" placeholder="' + esc(ph || (isMainItem(b, it) ? 'ยังไม่มี' : '')) + '" aria-label="GL Code ' + esc(it.code) + '"></td>' +
         '<td><input name="glName" value="' + esc(it.glName || '') + '" aria-label="GL Name ' + esc(it.code) + '"></td></tr>';
     }).join('');
     return '<div class="page-head"><div><h1>ใส่ GL Code · ' + esc(b.code) + '</h1><div class="page-sub">' + esc(b.name) +
       ' — ฝ่ายบัญชีใส่ GL ของแต่ละ Item ได้ทุกเมื่อ (ตอนตั้งงบไม่ต้องกรอก) · Item ย่อยที่เว้นว่างใช้ GL ของ Item แม่ · ใบเบิกใช้งบที่ยังไม่มี GL จะใช้ GL ล่าสุดของ Item</div></div></div>' +
       '<div id="formError"></div>' +
-      '<datalist id="glList">' + db.master.glCodes.map((g) => '<option value="' + esc(g.code) + '">' + esc(g.name) + '</option>').join('') + '</datalist>' +
       '<form id="glForm" data-id="' + b.id + '"><section class="card form-section"><div class="table-wrap"><table class="edit-table"><thead><tr><th style="width:6rem">รหัส</th><th>รายการ</th>' +
       '<th style="width:11rem">GL Code</th><th style="width:16rem">GL Name</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>' +
       '<div class="actions"><button class="btn primary" type="submit">บันทึก GL Code</button><a class="btn" data-back href="#/budget/' + b.id + '">ยกเลิก</a></div></form>';
@@ -3799,11 +3770,6 @@
     const form = document.getElementById('glForm');
     if (!form) return;
     const b = budgetById(form.dataset.id);
-    form.addEventListener('change', (e) => {
-      if (!e.target.matches('[name="gl"]')) return;
-      const g = db.master.glCodes.find((x) => x.code === e.target.value.trim());
-      if (g) e.target.closest('tr').querySelector('[name="glName"]').value = g.name;
-    });
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       let changed = 0;
@@ -3814,7 +3780,6 @@
         if ((it.glCode || '') !== code || (it.glName || '') !== name) changed += 1;
         it.glCode = code;
         it.glName = name;
-        if (code && !db.master.glCodes.some((g) => g.code === code)) db.master.glCodes.push({ code, name });
       });
       addHistory(b, 'บัญชีใส่ / แก้ GL Code', changed + ' รายการ', 'งบ ' + b.code);
       save();
@@ -4897,7 +4862,6 @@
 
   /** ข้อมูลที่ระบบคำนวณให้ใน Memo (ยอดเงิน ครั้งที่ ฯลฯ) และค่าเริ่มต้นของช่องที่ผู้ขอกรอกเองได้ */
   function memoModel(b, r) {
-    const party = (c) => (db.master.memoParties || []).find((x) => x.code === c) || {};
     const cname = (c) => companyMap()[c] || c;
     const t = USE_TYPES[r.useType] || {};
     const perLine = b.structure !== 'project';
@@ -4912,7 +4876,6 @@
     r.lines.forEach((l) => { const c = lineInvestor(b, l); byInv[c] = round2((byInv[c] || 0) + l.amount); });
     const invCodes = Object.keys(byInv).sort((x, y) => byInv[y] - byInv[x]);
     const investor = invCodes[0] || b.company;
-    const approver = party(investor);
     const mp = r.memoParties || defaultMemoParties(b, investor);
 
     // ครั้งที่ และยอดที่เบิกไปแล้วก่อนหน้า
@@ -5481,25 +5444,12 @@
     { key: 'assetTypes', title: 'ประเภทสินทรัพย์ (CAPEX)', hint: 'ตัวเลือกประเภทสินทรัพย์ของรายการย่อย', lock: false,
       cols: [{ k: 'name', label: 'ประเภทสินทรัพย์' }],
       inUse: (it) => db.budgets.some((b) => b.type === 'CAPEX' && b.items.some((i) => i.assetType === it.name)),
-      rename: (from, to) => db.budgets.forEach((b) => b.items.forEach((i) => { if (b.type === 'CAPEX' && i.assetType === from) i.assetType = to; })) },
-    { key: 'expenseCategories', title: 'หมวดค่าใช้จ่าย', hint: 'GL ตั้งต้นของงบรวมโครงการ OPEX — ถ้าชื่อรายการที่ Business พิมพ์ตรงกับหมวดในนี้ ระบบใส่ GL ให้ (ตอนขอเบิกไม่ต้องเลือกหมวดแล้ว)', lock: false,
-      cols: [{ k: 'name', label: 'หมวดค่าใช้จ่าย' }, { k: 'gl', label: 'GL Code (ถ้ามี)', w: '12rem' }],
-      inUse: (it) => db.requests.some((r) => r.lines.some((l) => l.category === it.name)),
-      rename: (from, to) => db.requests.forEach((r) => r.lines.forEach((l) => { if (l.category === from) l.category = to; })) },
-    { key: 'memoParties', title: 'ผู้ลงนามใน Memo', lock: true,
-      hint: 'ใช้พิมพ์ Memo ขอเบิกใช้งบ ตั้งรายบริษัท — "เรียน / สำเนาถึง / ผู้ทบทวน" ใช้ของ <strong>บริษัทที่ลงทุน</strong> (ถ้าคำขอมีหลายบริษัทใช้ของบริษัทที่ลงทุนมากที่สุด) · "ผู้ลงนามเสนอ" ใช้ของ <strong>บริษัทเจ้าของงบ</strong> · ใช้เป็น <strong>ค่าเริ่มต้น</strong> ในฟอร์มคำขอ (ผู้ขอแก้ได้ต่อคำขอ) · ข้อมูลในโหมดทดลองเก็บในเบราว์เซอร์นี้เท่านั้น',
-      cols: [{ k: 'code', label: 'บริษัท', w: '7rem' }, { k: 'to', label: 'เรียน / ผู้พิจารณาอนุมัติ (หลายคนคั่นด้วย ;)', w: '15rem' }, { k: 'cc', label: 'สำเนาถึง (หลายคนคั่นด้วย ;)', w: '13rem' },
-        { k: 'reviewer', label: 'ผู้ทบทวน / ให้ความเห็นชอบ (หลายคนคั่นด้วย ;)', w: '15rem' }, { k: 'signer', label: 'ผู้ลงนามเสนอ (ชื่อ / ตำแหน่ง)', w: '15rem' }],
-      inUse: () => false },
-    { key: 'glCodes', title: 'GL Code (OPEX)', hint: 'เลือก GL Code ในรายการต้นทุน แล้วระบบเติมชื่อ GL ให้', lock: true,
-      cols: [{ k: 'code', label: 'GL Code', w: '10rem' }, { k: 'name', label: 'ชื่อ GL' }],
-      inUse: (it) => db.budgets.some((b) => b.type === 'CBS' && b.items.some((i) => i.glCode === it.code)) ||
-        db.requests.some((r) => r.type === 'CBS' && r.lines.some((l) => l.glCode === it.code)) }
+      rename: (from, to) => db.budgets.forEach((b) => b.items.forEach((i) => { if (b.type === 'CAPEX' && i.assetType === from) i.assetType = to; })) }
   ];
 
   /** เมนูย่อยของข้อมูลหลัก: [key, ชื่อเมนู] */
   const MASTER_NAV = [['companies', 'บริษัท'], ['departments', 'หน่วยงาน'], ['groups', 'กลุ่มงบประมาณ'], ['assetTypes', 'ประเภทสินทรัพย์'],
-    ['expenseCategories', 'หมวดค่าใช้จ่าย'], ['glCodes', 'GL Code'], ['memoParties', 'ผู้ลงนาม Memo'], ['suppliers', 'Supplier'], ['listGroups', 'กลุ่มรายการ'], ['priorityGroups', 'กลุ่ม Priority'], ['investGroups', 'กลุ่ม Priority การลงทุน']];
+    ['suppliers', 'Supplier'], ['listGroups', 'กลุ่มรายการ'], ['priorityGroups', 'กลุ่ม Priority'], ['investGroups', 'กลุ่ม Priority การลงทุน']];
 
   function masterRow(sec, it, isNew) {
     return '<tr data-orig="' + (isNew ? '' : esc(it[sec.cols[0].k])) + '">' + sec.cols.map((c, i) => (c.type === 'image'
