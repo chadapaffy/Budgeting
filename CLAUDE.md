@@ -9,6 +9,7 @@
 ## ขั้นตอนขึ้นเว็บ
 
 - พัฒนาที่ branch `claude/adoring-bardeen-2zqnm7` (รีเซ็ตจาก `origin/main` ทุกงาน) → push → สร้าง draft PR → ตั้งเป็น ready → squash merge → ตรวจ GitHub Pages deploy
+- รีโป: `precise-org/Budgeting` (git remote `origin` = https://github.com/precise-org/Budgeting) · เว็บ: https://precise-org.github.io/Budgeting/ (ตรวจ deploy โดยเปิดเว็บแล้วดู meta `app-version` ว่าตรงกับเลขที่เพิ่งขึ้น)
 - เปลี่ยนเลขเวอร์ชันใน `index.html` (5 จุด: meta `app-version` และ `?v=` ของ css / js) ทุกครั้งที่ขึ้นเว็บ
 - ห้ามนำข้อมูลบริษัทจริงขึ้นเว็บสาธารณะ · ห้ามใส่ service_role key / รหัสผ่านฐานข้อมูล
 - ตอบผู้ใช้เป็นภาษาไทย
