@@ -54,40 +54,44 @@ revoke all on public.v2_docs, public.v2_counters, public.v2_log from anon, authe
 
 -- ---------------------------------------------------------------- ตัวช่วยภายใน (เบราว์เซอร์เรียกไม่ได้)
 
+-- ลบเวอร์ชันเก่าที่รับบทบาทเดียว (ตอนนี้รับรายการบทบาทของผู้ใช้)
+drop function if exists public._v2_sees_all(text);
+drop function if exists public._v2_can_write(text, text);
+
 /** บทบาทที่ต้องเห็นงานของคนอื่น — ต้องตรงกับ canViewAll() ใน js/app.js */
-create or replace function public._v2_sees_all(p_role text) returns boolean
+create or replace function public._v2_sees_all(p_roles text[]) returns boolean
 language sql stable security definer set search_path = public as $$
-  select public._v2_perms(p_role) && array['budget.view_all', 'budget.manage', 'budget.verify', 'request.decide', 'cut.record', 'po.record', 'business.proxy', 'gl.manage']
+  select public._v2_perms(p_roles) && array['budget.view_all', 'budget.manage', 'budget.verify', 'request.decide', 'cut.record', 'po.record', 'business.proxy', 'gl.manage']
 $$;
 
 /** ขอบเขตบริษัท — ต้องตรงกับ companyScope() ใน js/app.js (Admin เห็นทุกบริษัท) */
 create or replace function public._v2_company_ok(u public.v2_profiles, p_company text) returns boolean
 language sql immutable set search_path = public as $$
-  select u.role = 'admin' or p_company = any (u.companies)
+  select 'admin' = any (u.roles) or p_company = any (u.companies)
 $$;
 
 create or replace function public._v2_doc_visible(u public.v2_profiles, p_kind text, p_company text, p_owner text, p_requester text) returns boolean
 language sql stable security definer set search_path = public as $$
   select case
-    when public._v2_sees_all(u.role) then public._v2_company_ok(u, p_company)
+    when public._v2_sees_all(u.roles) then public._v2_company_ok(u, p_company)
     when p_kind = 'request' then p_requester = u.id::text
     else p_owner = u.id::text
   end
 $$;
 
-create or replace function public._v2_can_write(p_role text, p_kind text) returns boolean
+create or replace function public._v2_can_write(p_roles text[], p_kind text) returns boolean
 language sql stable security definer set search_path = public as $$
   select case p_kind
-    when 'budget'  then public._v2_perms(p_role) && array['budget.create', 'budget.manage', 'budget.verify', 'budget.adjust', 'request.create', 'business.proxy', 'gl.manage']
-    when 'request' then public._v2_perms(p_role) && array['request.create', 'request.decide', 'cut.record', 'po.record', 'budget.manage', 'budget.verify', 'business.proxy']
-    when 'change'  then public._v2_perms(p_role) && array['budget.create', 'request.create', 'budget.verify', 'budget.manage', 'budget.adjust', 'business.proxy']
+    when 'budget'  then public._v2_perms(p_roles) && array['budget.create', 'budget.manage', 'budget.verify', 'budget.adjust', 'request.create', 'business.proxy', 'gl.manage']
+    when 'request' then public._v2_perms(p_roles) && array['request.create', 'request.decide', 'cut.record', 'po.record', 'budget.manage', 'budget.verify', 'business.proxy']
+    when 'change'  then public._v2_perms(p_roles) && array['budget.create', 'request.create', 'budget.verify', 'budget.manage', 'budget.adjust', 'business.proxy']
     else false
   end
 $$;
 
 create or replace function public._v2_log_visible(u public.v2_profiles, p_by uuid, p_owner text) returns boolean
 language sql stable security definer set search_path = public as $$
-  select 'log.view' = any (public._v2_perms(u.role)) or p_by = u.id or p_owner = u.id::text
+  select 'log.view' = any (public._v2_perms(u.roles)) or p_by = u.id or p_owner = u.id::text
 $$;
 
 -- ---------------------------------------------------------------- บันทึก
@@ -136,7 +140,7 @@ begin
     v_kind := d ->> 'kind';
     v_id := d ->> 'id';
     if v_kind is null or v_kind not in ('budget', 'request', 'change') or coalesce(v_id, '') = '' then raise exception 'ชนิดหรือรหัสเอกสารไม่ถูกต้อง'; end if;
-    if not public._v2_can_write(u.role, v_kind) then raise exception 'ไม่มีสิทธิ์บันทึกเอกสารชนิดนี้ (%)', v_kind using errcode = '42501'; end if;
+    if not public._v2_can_write(u.roles, v_kind) then raise exception 'ไม่มีสิทธิ์บันทึกเอกสารชนิดนี้ (%)', v_kind using errcode = '42501'; end if;
     is_del := coalesce((d ->> 'deleted')::boolean, false);
     expected := coalesce((d ->> 'version')::integer, 0);
     if not is_del and (d -> 'data' is null or jsonb_typeof(d -> 'data') <> 'object') then raise exception 'ไม่มีข้อมูลเอกสาร'; end if;
@@ -166,11 +170,11 @@ begin
       end if;
       if v_kind = 'budget' then
         -- ธุรการ (business.proxy) เป็นเจ้าของงบไม่ได้
-        if own <> '' and exists (select 1 from public.v2_profiles pp where pp.id::text = own and 'business.proxy' = any (public._v2_perms(pp.role))) then
+        if own <> '' and exists (select 1 from public.v2_profiles pp where pp.id::text = own and 'business.proxy' = any (public._v2_perms(pp.roles))) then
           raise exception 'ธุรการเป็นเจ้าของงบไม่ได้ — เลือก Business เจ้าของงบ' using errcode = '42501';
         end if;
         -- ธุรการเปลี่ยนสถานะงบไปขั้นอนุมัติ / เปิดใช้ไม่ได้ (ทั้งสร้างใหม่และแก้ของเดิม) — สถานะเดิมที่ไม่เปลี่ยนแก้ข้อมูลอื่นได้
-        if 'business.proxy' = any (public._v2_perms(u.role))
+        if 'business.proxy' = any (public._v2_perms(u.roles))
            and coalesce(d -> 'data' ->> 'state', '') in ('pending_open', 'open_review', 'open_returned', 'active')
            and coalesce(d -> 'data' ->> 'state', '') is distinct from (case when ex.id is not null and not ex.deleted then coalesce(ex.data ->> 'state', '') end) then
           raise exception 'ธุรการอนุมัติหรือเปิดใช้งบไม่ได้ — เปิดใช้งบครั้งแรกต้องเป็น Business เจ้าของงบ' using errcode = '42501';
@@ -235,8 +239,8 @@ end $$;
 
 -- ---------------------------------------------------------------- สิทธิ์เรียกฟังก์ชัน
 
-revoke all on function public._v2_sees_all(text), public._v2_company_ok(public.v2_profiles, text),
-  public._v2_doc_visible(public.v2_profiles, text, text, text, text), public._v2_can_write(text, text),
+revoke all on function public._v2_sees_all(text[]), public._v2_company_ok(public.v2_profiles, text),
+  public._v2_doc_visible(public.v2_profiles, text, text, text, text), public._v2_can_write(text[], text),
   public._v2_log_visible(public.v2_profiles, uuid, text) from public, anon, authenticated;
 revoke all on function public.v2_save_docs(jsonb, jsonb), public.v2_load(timestamptz) from public, anon, authenticated;
 grant execute on function public.v2_save_docs(jsonb, jsonb), public.v2_load(timestamptz) to authenticated;

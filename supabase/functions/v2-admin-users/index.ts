@@ -1,6 +1,6 @@
 // Edge Function: จัดการบัญชีผู้ใช้ที่ต้องใช้สิทธิ์ service_role (เบราว์เซอร์ทำเองไม่ได้ และห้ามมี service_role key ในเบราว์เซอร์)
 //   ต้องเป็น Admin (แนบ Authorization: Bearer <access token> · ผู้เรียก active + มีสิทธิ์ user.manage):
-//     { action: 'create', email, name, title, department, company, companies, role } → { user }
+//     { action: 'create', email, name, title, department, company, companies, roles (รายการ · หรือ role บทบาทเดียว) } → { user }
 //     { action: 'reset', id }                    → { ok }   (ล้างรหัสผ่านเดิมทิ้ง → ผู้ใช้ "เปิดใช้ครั้งแรก" ตั้งรหัสใหม่เอง)
 //     { action: 'set_active', id, active }       → { user } (ปิดบัญชี = ban ใน Supabase Auth ด้วย)
 //   สาธารณะ (ยังไม่ล็อกอิน — ใช้ anon key):
@@ -33,15 +33,24 @@ const validEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
 type Profile = {
   id: string; email: string; name: string; title: string; department: string; company: string;
-  companies: string[]; role: string; active: boolean; created_at: string; last_login_at: string | null;
+  companies: string[]; role: string; roles: string[]; active: boolean; created_at: string; last_login_at: string | null;
   reset_requested_at: string | null; reset_at: string | null; password_set_at: string | null;
 };
 
 const userJson = (p: Profile) => ({
   id: p.id, email: p.email, name: p.name, title: p.title, department: p.department, company: p.company,
-  companies: p.companies, role: p.role, active: p.active, createdAt: p.created_at, lastLoginAt: p.last_login_at,
+  companies: p.companies, role: (p.roles && p.roles[0]) || p.role, roles: p.roles && p.roles.length ? p.roles : [p.role], active: p.active, createdAt: p.created_at, lastLoginAt: p.last_login_at,
   resetRequestedAt: p.reset_requested_at, resetAt: p.reset_at, passwordSetAt: p.password_set_at,
 });
+
+const rolesOf = (p: { role: string; roles?: string[] }): string[] => (p.roles && p.roles.length ? p.roles : (p.role ? [p.role] : []));
+
+/** สิทธิ์รวมของหลายบทบาท */
+async function permsOfRoles(roles: string[]): Promise<string[]> {
+  if (!roles.length) return [];
+  const { data } = await admin.from('v2_roles').select('permissions').in('key', roles);
+  return [...new Set((data || []).flatMap((r) => r.permissions as string[]))];
+}
 
 /** ผู้เรียกต้องล็อกอิน (token ถูกต้อง) + active + บทบาทมีสิทธิ์ user.manage */
 async function caller(req: Request): Promise<Profile | null> {
@@ -52,8 +61,7 @@ async function caller(req: Request): Promise<Profile | null> {
   if (error || !data.user) return null;
   const { data: p } = await admin.from('v2_profiles').select('*').eq('id', data.user.id).maybeSingle();
   if (!p || !p.active) return null;
-  const { data: r } = await admin.from('v2_roles').select('permissions').eq('key', p.role).maybeSingle();
-  if (!r || !(r.permissions as string[]).includes('user.manage')) return null;
+  if (!(await permsOfRoles(rolesOf(p))).includes('user.manage')) return null;
   return p as Profile;
 }
 
@@ -71,7 +79,7 @@ function passwordProblem(pw: string, email: string): string {
 async function activeManagers(except: string): Promise<number> {
   const { data: roles } = await admin.from('v2_roles').select('key, permissions');
   const keys = (roles || []).filter((r) => (r.permissions as string[]).includes('user.manage')).map((r) => r.key);
-  const { data } = await admin.from('v2_profiles').select('id').eq('active', true).neq('id', except).in('role', keys);
+  const { data } = await admin.from('v2_profiles').select('id').eq('active', true).neq('id', except).overlaps('roles', keys);
   return (data || []).length;
 }
 
@@ -115,11 +123,12 @@ Deno.serve(async (req) => {
     if (body.action === 'create') {
       const email = str(body.email).toLowerCase();
       const name = str(body.name);
-      const role = str(body.role);
+      const roles = [...new Set((Array.isArray(body.roles) ? (body.roles as unknown[]) : [body.role]).map(str).filter(Boolean))];
       if (!validEmail(email)) return fail('รูปแบบอีเมลไม่ถูกต้อง');
       if (!name) return fail('กรุณาระบุชื่อ');
-      const { data: r } = await admin.from('v2_roles').select('key').eq('key', role).maybeSingle();
-      if (!r) return fail('ไม่พบบทบาท');
+      if (!roles.length) return fail('กรุณาเลือกบทบาทอย่างน้อย 1 บทบาท');
+      const { data: found } = await admin.from('v2_roles').select('key').in('key', roles);
+      if ((found || []).length !== roles.length) return fail('ไม่พบบทบาท');
       const { data: dup } = await admin.from('v2_profiles').select('id').ilike('email', email.replace(/[%_\\]/g, '\\$&')).maybeSingle();
       if (dup) return fail('อีเมลนี้มีอยู่ในระบบแล้ว');
       const company = str(body.company);
@@ -130,7 +139,7 @@ Deno.serve(async (req) => {
       if (created.error || !created.data.user) return fail('สร้างบัญชีไม่สำเร็จ: ' + (created.error?.message || ''), 400);
       const id = created.data.user.id;
       const { data: p, error: pe } = await admin.from('v2_profiles').insert({
-        id, email, name, title: str(body.title), department: str(body.department), company, companies, role, created_by: me.id,
+        id, email, name, title: str(body.title), department: str(body.department), company, companies, role: roles[0], roles, created_by: me.id,
       }).select('*').single();
       if (pe || !p) {
         await admin.auth.admin.deleteUser(id); // ไม่ให้เหลือบัญชีที่ไม่มีโปรไฟล์
@@ -157,8 +166,7 @@ Deno.serve(async (req) => {
       if (!p) return fail('ไม่พบบัญชี');
       if (!active) {
         if (id === me.id) return fail('ปิดบัญชีของตัวเองไม่ได้');
-        const { data: r } = await admin.from('v2_roles').select('permissions').eq('key', p.role).maybeSingle();
-        if (p.active && r && (r.permissions as string[]).includes('user.manage') && (await activeManagers(id)) === 0) {
+        if (p.active && (await permsOfRoles(rolesOf(p))).includes('user.manage') && (await activeManagers(id)) === 0) {
           return fail('ต้องมีผู้ดูแลระบบที่เปิดใช้งานอย่างน้อย 1 คน');
         }
       }

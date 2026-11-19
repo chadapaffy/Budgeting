@@ -93,8 +93,9 @@ function startFake(options) {
           `select p.proargnames as names, array(select format_type(t, null) from unnest(p.proargtypes::oid[]) t) as types
            from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = $1`, [fn]);
         if (!sig.rows.length) return send(res, 404, { code: 'PGRST202', message: 'Could not find the function public.' + fn });
-        const { names, types } = sig.rows[0];
         const keys = Object.keys(body);
+        // ฟังก์ชันชื่อเดียวกันหลายแบบ (overload): PostgREST เลือกตามชื่อพารามิเตอร์ที่ส่งมา
+        const { names, types } = sig.rows.find((x) => keys.every((k) => (x.names || []).includes(k))) || sig.rows[0];
         const bad = keys.find((k) => !(names || []).includes(k));
         if (bad) return send(res, 404, { code: 'PGRST202', message: 'Could not find the function public.' + fn + ' with parameter ' + bad });
         // PostgREST แปลง JSON array → text[] ให้เอง — จำลองด้วย jsonb_array_elements_text

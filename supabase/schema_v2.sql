@@ -1,4 +1,4 @@
--- ระบบขอเบิกใช้งบประมาณ (ต้นแบบรอบใหม่) — เฟส 1: ล็อกอินและบัญชีผู้ใช้ · เฟส 2: ข้อมูลหลัก
+-- ระบบขอเบิกใช้งบประมาณ (ต้นแบบรอบใหม่) — 1 ผู้ใช้หลายบทบาท (v2_profiles.roles) · เฟส 1: ล็อกอินและบัญชีผู้ใช้ · เฟส 2: ข้อมูลหลัก
 -- ตารางทั้งหมดขึ้นต้นด้วย v2_ ไม่แตะตารางของระบบรอบแรก (profiles / app_*)
 -- รันซ้ำได้ ไม่ลบข้อมูล · วางทั้งไฟล์ใน Supabase → SQL Editor → Run
 --
@@ -39,6 +39,26 @@ create unique index if not exists v2_profiles_email_key on public.v2_profiles (l
 alter table public.v2_profiles add column if not exists password_set_at timestamptz;
 update public.v2_profiles set password_set_at = last_login_at where password_set_at is null and last_login_at is not null;
 
+-- หลายบทบาทต่อผู้ใช้: roles = บทบาททั้งหมด (สิทธิ์ = รวมทุกบทบาท) · role = บทบาทหลัก (roles[1]) เก็บไว้ให้โค้ดเดิม/Edge Function เก่าใช้ต่อได้
+alter table public.v2_profiles add column if not exists roles text[] not null default '{}';
+update public.v2_profiles set roles = array[role] where cardinality(roles) = 0 and role is not null;
+
+create or replace function public._v2_sync_roles() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if cardinality(coalesce(new.roles, '{}')) = 0 then
+    new.roles := case when new.role is null then '{}'::text[] else array[new.role] end;   -- ผู้เรียกแบบเก่าส่งแต่ role
+  elsif tg_op = 'INSERT' or new.roles is distinct from old.roles then
+    new.role := new.roles[1];
+  elsif new.role is distinct from old.role then
+    new.roles := array[new.role];                                                         -- แก้คอลัมน์ role ตรงๆ ใน SQL Editor = บทบาทเดียว
+  end if;
+  return new;
+end $$;
+drop trigger if exists v2_profiles_sync_roles on public.v2_profiles;
+create trigger v2_profiles_sync_roles before insert or update on public.v2_profiles
+  for each row execute function public._v2_sync_roles();
+
 alter table public.v2_roles    enable row level security;
 alter table public.v2_profiles enable row level security;
 revoke all on public.v2_roles, public.v2_profiles from anon, authenticated;
@@ -76,6 +96,12 @@ language sql stable security definer set search_path = public as $$
   select coalesce((select r.permissions from public.v2_roles r where r.key = p_role), '{}'::text[])
 $$;
 
+/** สิทธิ์รวมของหลายบทบาท (ไม่ซ้ำ) */
+create or replace function public._v2_perms(p_roles text[]) returns text[]
+language sql stable security definer set search_path = public as $$
+  select coalesce((select array_agg(distinct k) from public.v2_roles r, unnest(r.permissions) k where r.key = any (coalesce(p_roles, '{}'))), '{}'::text[])
+$$;
+
 /** ต้องเป็นผู้ใช้ที่ active และบทบาทมีสิทธิ์ p_perm */
 create or replace function public._v2_need(p_perm text) returns public.v2_profiles
 language plpgsql stable security definer set search_path = public as $$
@@ -85,7 +111,7 @@ begin
   if u.id is null then
     raise exception 'ไม่มีสิทธิ์ใช้งาน (ไม่พบบัญชีในระบบ หรือบัญชีถูกปิดการใช้งาน)' using errcode = '42501';
   end if;
-  if not (p_perm = any (public._v2_perms(u.role))) then
+  if not (p_perm = any (public._v2_perms(u.roles))) then
     raise exception 'ไม่มีสิทธิ์ทำรายการนี้' using errcode = '42501';
   end if;
   return u;
@@ -95,14 +121,14 @@ end $$;
 create or replace function public._v2_managers(p_ignore uuid) returns integer
 language sql stable security definer set search_path = public as $$
   select count(*)::integer from public.v2_profiles p
-  where p.active and (p_ignore is null or p.id <> p_ignore) and 'user.manage' = any (public._v2_perms(p.role))
+  where p.active and (p_ignore is null or p.id <> p_ignore) and 'user.manage' = any (public._v2_perms(p.roles))
 $$;
 
 create or replace function public._v2_user_json(p public.v2_profiles, p_full boolean) returns jsonb
 language sql immutable set search_path = public as $$
   select jsonb_build_object(
     'id', p.id, 'name', p.name, 'title', p.title, 'department', p.department, 'company', p.company,
-    'companies', to_jsonb(p.companies), 'role', p.role, 'active', p.active)
+    'companies', to_jsonb(p.companies), 'role', p.roles[1], 'roles', to_jsonb(p.roles), 'active', p.active)
     || case when p_full then jsonb_build_object(
       'email', p.email, 'createdAt', p.created_at, 'lastLoginAt', p.last_login_at,
       'resetRequestedAt', p.reset_requested_at, 'resetAt', p.reset_at, 'passwordSetAt', p.password_set_at) else '{}'::jsonb end
@@ -120,7 +146,7 @@ begin
   if p_login then
     update public.v2_profiles set last_login_at = now(), reset_requested_at = null, password_set_at = coalesce(password_set_at, now()) where id = u.id returning * into u;
   end if;
-  return public._v2_user_json(u, true) || jsonb_build_object('permissions', to_jsonb(public._v2_perms(u.role)));
+  return public._v2_user_json(u, true) || jsonb_build_object('permissions', to_jsonb(public._v2_perms(u.roles)));
 end $$;
 
 /** รายชื่อผู้ใช้ที่เปิดใช้งาน (ไม่มีอีเมล) — ไว้เลือก/แท็กงานถึงคน ใช้ได้ทุกคนที่ล็อกอิน */
@@ -141,28 +167,40 @@ begin
   return coalesce((select jsonb_agg(public._v2_user_json(p, true) order by p.created_at, p.name) from public.v2_profiles p), '[]'::jsonb);
 end $$;
 
-/** แก้ข้อมูลบัญชี (ไม่รวมเปิด/ปิดใช้งานและอีเมล — ทำผ่าน Edge Function) */
-create or replace function public.v2_update_user(p_id uuid, p_name text, p_title text, p_department text, p_company text, p_companies text[], p_role text)
+/** แก้ข้อมูลบัญชี (ไม่รวมเปิด/ปิดใช้งานและอีเมล — ทำผ่าน Edge Function) · p_roles = บทบาททั้งหมดของผู้ใช้ (อย่างน้อย 1) */
+create or replace function public.v2_update_user(p_id uuid, p_name text, p_title text, p_department text, p_company text, p_companies text[], p_roles text[])
 returns jsonb
 language plpgsql volatile security definer set search_path = public as $$
-declare target public.v2_profiles; r public.v2_roles;
+declare target public.v2_profiles; new_roles text[];
 begin
   perform public._v2_need('user.manage');
   select * into target from public.v2_profiles where id = p_id;
   if target.id is null then raise exception 'ไม่พบบัญชี'; end if;
   if btrim(coalesce(p_name, '')) = '' then raise exception 'กรุณาระบุชื่อ'; end if;
-  select * into r from public.v2_roles where key = p_role;
-  if r.key is null then raise exception 'ไม่พบบทบาท'; end if;
-  if target.active and 'user.manage' = any (public._v2_perms(target.role)) and not ('user.manage' = any (r.permissions))
+  new_roles := array(select distinct k from unnest(coalesce(p_roles, '{}')) k);
+  if cardinality(new_roles) = 0 then raise exception 'กรุณาเลือกบทบาทอย่างน้อย 1 บทบาท'; end if;
+  if exists (select 1 from unnest(new_roles) k where not exists (select 1 from public.v2_roles r where r.key = k)) then
+    raise exception 'ไม่พบบทบาท';
+  end if;
+  -- คงลำดับตามที่ส่งมา (บทบาทแรก = บทบาทหลัก)
+  new_roles := array(select k from unnest(coalesce(p_roles, '{}')) with ordinality t(k, i) group by k order by min(i));
+  if target.active and 'user.manage' = any (public._v2_perms(target.roles)) and not ('user.manage' = any (public._v2_perms(new_roles)))
      and public._v2_managers(target.id) = 0 then
     raise exception 'ต้องมีผู้ดูแลระบบที่เปิดใช้งานอย่างน้อย 1 คน' using errcode = '42501';
   end if;
   update public.v2_profiles set
     name = btrim(p_name), title = btrim(coalesce(p_title, '')), department = btrim(coalesce(p_department, '')),
-    company = btrim(coalesce(p_company, '')), companies = coalesce(p_companies, '{}'), role = p_role
+    company = btrim(coalesce(p_company, '')), companies = coalesce(p_companies, '{}'), roles = new_roles
   where id = p_id returning * into target;
   return public._v2_user_json(target, true);
 end $$;
+
+/** เวอร์ชันเดิม (บทบาทเดียว) — เก็บไว้ให้เว็บรุ่นเก่าที่ยังเปิดค้างอยู่ */
+create or replace function public.v2_update_user(p_id uuid, p_name text, p_title text, p_department text, p_company text, p_companies text[], p_role text)
+returns jsonb
+language sql volatile security definer set search_path = public as $$
+  select public.v2_update_user(p_id, p_name, p_title, p_department, p_company, p_companies, array[p_role])
+$$;
 
 /** ผู้ใช้กด "ลืมรหัสผ่าน" (ยังไม่ล็อกอิน) — ทำเครื่องหมายให้ Admin เห็น ตอบเหมือนกันไม่ว่ามีอีเมลนี้หรือไม่ */
 create or replace function public.v2_request_reset(p_email text) returns boolean
@@ -213,7 +251,7 @@ begin
   end if;
   if exists (select 1 from public.v2_roles where key = p_key) and not ('user.manage' = any (perms))
      and 'user.manage' = any (public._v2_perms(p_key))
-     and not exists (select 1 from public.v2_profiles p where p.active and p.role <> p_key and 'user.manage' = any (public._v2_perms(p.role))) then
+     and not exists (select 1 from public.v2_profiles p where p.active and 'user.manage' = any (public._v2_perms(array_remove(p.roles, p_key)))) then
     raise exception 'ต้องมีผู้ดูแลระบบที่เปิดใช้งานอย่างน้อย 1 คน' using errcode = '42501';
   end if;
   insert into public.v2_roles (key, name, description, permissions) values (p_key, btrim(p_name), coalesce(p_description, ''), perms)
@@ -230,7 +268,7 @@ begin
   select * into r from public.v2_roles where key = p_key;
   if r.key is null then raise exception 'ไม่พบบทบาท'; end if;
   if r.is_system then raise exception 'ลบบทบาทตั้งต้นไม่ได้'; end if;
-  if exists (select 1 from public.v2_profiles where role = p_key) then raise exception 'ยังมีผู้ใช้ใช้บทบาทนี้อยู่ ย้ายผู้ใช้ไปบทบาทอื่นก่อน'; end if;
+  if exists (select 1 from public.v2_profiles where p_key = any (roles)) then raise exception 'ยังมีผู้ใช้ใช้บทบาทนี้อยู่ ย้ายผู้ใช้ไปบทบาทอื่นก่อน'; end if;
   delete from public.v2_roles where key = p_key;
 end $$;
 
@@ -329,7 +367,7 @@ declare u public.v2_profiles; n text; r public.v2_master;
 begin
   u := public._v2_user();
   if u.id is null then raise exception 'ไม่มีสิทธิ์ใช้งาน' using errcode = '42501'; end if;
-  if not ('request.create' = any (public._v2_perms(u.role)) or 'master.manage' = any (public._v2_perms(u.role))) then
+  if not ('request.create' = any (public._v2_perms(u.roles)) or 'master.manage' = any (public._v2_perms(u.roles))) then
     raise exception 'ไม่มีสิทธิ์ทำรายการนี้' using errcode = '42501';
   end if;
   n := btrim(regexp_replace(coalesce(p_name, ''), '\s+', ' ', 'g'));
@@ -352,15 +390,15 @@ end $$;
 
 -- ---------------------------------------------------------------- สิทธิ์เรียกฟังก์ชัน
 
-revoke all on function public._v2_user(), public._v2_perms(text), public._v2_need(text), public._v2_managers(uuid),
+revoke all on function public._v2_user(), public._v2_perms(text), public._v2_perms(text[]), public._v2_need(text), public._v2_managers(uuid),
   public._v2_user_json(public.v2_profiles, boolean), public._v2_perm_catalog(), public._v2_master_keys(), public._v2_master_check(text, jsonb) from public, anon, authenticated;
 
 revoke all on function public.v2_me(boolean), public.v2_directory(), public.v2_list_users(),
-  public.v2_update_user(uuid, text, text, text, text, text[], text), public.v2_request_reset(text),
+  public.v2_update_user(uuid, text, text, text, text, text[], text), public.v2_update_user(uuid, text, text, text, text, text[], text[]), public.v2_request_reset(text),
   public.v2_list_roles(), public.v2_save_role(text, text, text, text[]), public.v2_delete_role(text) from public, anon, authenticated;
 
 grant execute on function public.v2_me(boolean), public.v2_directory(), public.v2_list_users(),
-  public.v2_update_user(uuid, text, text, text, text, text[], text),
+  public.v2_update_user(uuid, text, text, text, text, text[], text), public.v2_update_user(uuid, text, text, text, text, text[], text[]),
   public.v2_list_roles(), public.v2_save_role(text, text, text, text[]), public.v2_delete_role(text) to authenticated;
 grant execute on function public.v2_request_reset(text) to anon, authenticated;
 revoke all on function public.v2_activation_status(text) from public, anon, authenticated;
