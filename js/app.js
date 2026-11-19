@@ -903,10 +903,11 @@
     const nm = {};
     Object.keys(map).forEach((k) => { if (DEMO_ROLE_PERMS[k]) nm[k] = String(names[k] != null ? names[k] : ROLE_LABEL[k] || k).trim(); });
     const seen = {};
-    Object.keys(nm).forEach((k) => {
-      if (!nm[k]) throw new Error('กรุณาระบุชื่อบทบาท');
-      if (seen[nm[k]]) throw new Error('มีบทบาทชื่อ "' + nm[k] + '" ซ้ำกัน');
-      seen[nm[k]] = true;
+    Object.keys(DEMO_ROLE_PERMS).forEach((k) => {
+      const n = nm[k] != null ? nm[k] : String(ROLE_LABEL[k] || k).trim();
+      if (!n) throw new Error('กรุณาระบุชื่อบทบาท');
+      if (seen[n]) throw new Error('มีบทบาทชื่อ "' + n + '" อยู่แล้ว');
+      seen[n] = true;
     });
     if (AUTH_REMOTE) return remoteRolesSave(map, nm);
     Object.keys(map).forEach((k) => {
@@ -6601,60 +6602,155 @@
       '<tr id="userEmpty" hidden><td colspan="10" class="empty">ไม่พบผู้ใช้</td></tr></tbody></table></div>';
   }
 
+  // เลือกบทบาททางซ้าย → ติ๊กสิทธิ์ของบทบาทนั้นทางขวา (ไม่มีตารางทุกบทบาทพร้อมกัน) — บทบาทที่เลือกจำไว้ระหว่างเปลี่ยนหน้า
+  let adminRoleSel = '';
+  const roleUserCount = (k) => USERS.filter((u) => rolesOf(u).includes(k)).length;
+  const roleUnknownPerm = (pm) => AUTH_REMOTE && remotePermCatalog && !remotePermCatalog.includes(pm.key);
   function viewAdminRoles() {
     const keys = roleKeys();
+    if (!keys.includes(adminRoleSel)) adminRoleSel = keys[0] || '';
+    const stale = PERMISSIONS.filter(roleUnknownPerm);
+    const fld = (label, inner) => '<label class="field"><span>' + label + '</span>' + inner + '</label>';
+    const list = keys.map((k) => '<button type="button" class="role-item' + (k === adminRoleSel ? ' active' : '') + '" data-role-pick="' + esc(k) + '"' + (k === adminRoleSel ? ' aria-current="true"' : '') + '><strong>' + esc(ROLE_LABEL[k] || k) + '</strong><span>' + roleUserCount(k) + ' คน</span></button>').join('');
+    const modal = '<div class="viewer" id="roleFormCard" role="dialog" aria-modal="true" aria-labelledby="roleFormTitle" hidden><div class="viewer-panel is-form">' +
+      '<div class="viewer-head"><strong class="viewer-name" id="roleFormTitle">สร้างบทบาท</strong><div class="viewer-actions"><button type="button" class="btn small" data-role-close aria-label="ปิด">ปิด ✕</button></div></div>' +
+      '<div class="viewer-form"><div id="roleFormError"></div><form id="roleForm" novalidate><div class="form-grid">' +
+      '<label class="field full req"><span>ชื่อบทบาท</span><input name="name" required maxlength="60" placeholder="เช่น ผู้ตรวจสอบภายใน"></label>' +
+      '<label class="field full" id="roleCopyField"><span>คัดลอกสิทธิ์จาก (ไม่บังคับ)</span><div class="select-wrap"><select name="copy"><option value="">— เริ่มจากไม่มีสิทธิ์ —</option>' + keys.map((k) => opt(k, ROLE_LABEL[k] || k, '')).join('') + '</select></div></label>' +
+      '</div><div class="actions"><button class="btn primary" type="submit" id="roleFormSave">สร้าง</button><button class="btn" type="button" data-role-cancel>ยกเลิก</button></div></form></div></div></div>';
+    return (stale.length ? '<div class="alert warn">ฐานข้อมูล Supabase ยังเป็นเวอร์ชันเก่า ไม่รู้จักสิทธิ์: ' + stale.map((x) => esc(x.label)).join(' · ') + ' — บันทึกแล้วสิทธิ์เหล่านี้จะหาย ให้ผู้ดูแลรัน <code>supabase/schema_v2.sql</code> ใหม่ใน SQL Editor ก่อน (ดู SETUP-v2.md ขั้นตอน 2)</div>' : '') + modal +
+      '<div class="muted section-hint">เลือกบทบาททางซ้าย แล้วติ๊กสิทธิ์ทางขวา — 1 คนมีได้หลายบทบาท (สิทธิ์รวมกัน) · มีผลกับผู้ใช้ทุกคนในบทบาทนั้นทันทีหลังกดบันทึก (ผู้ใช้ที่ล็อกอินอยู่ต้องรีเซ็ตหน้า)</div>' +
+      '<div class="role-split"><section class="card role-list-card"><div class="section-head"><h2 class="section-title">บทบาท <span class="rr-count">' + keys.length + '</span></h2>' +
+      '<button type="button" class="btn small primary" data-role-new>+ สร้าง</button></div><div class="role-list" id="roleList">' + (list || '<div class="empty">ยังไม่มีบทบาท</div>') + '</div>' +
+      (AUTH_REMOTE ? '' : '<div class="actions"><button class="btn small" type="button" data-roles-reset>คืนค่าเริ่มต้น</button></div>') + '</section>' +
+      '<section class="card role-panel" id="rolePanel"></section></div>';
+  }
+  /** วาดแผงสิทธิ์ของบทบาทที่เลือก (draft = สิทธิ์ที่ติ๊กอยู่ ยังไม่บันทึก) */
+  function roleCountText(k) { return 'ผู้ใช้ ' + roleUserCount(k) + ' คน'; }
+  function renderRolePanel(draft) {
+    const panel = document.getElementById('rolePanel');
+    const k = adminRoleSel;
+    if (!panel) return;
+    if (!k) { panel.innerHTML = '<div class="empty">ยังไม่มีบทบาท — กด "+ สร้าง"</div>'; return; }
     let group = '';
-    const unknownPerm = (pm) => AUTH_REMOTE && remotePermCatalog && !remotePermCatalog.includes(pm.key);
-    const stale = PERMISSIONS.filter(unknownPerm);
-    const head = keys.map((k) => '<th class="center perm-col"><input data-role-name="' + esc(k) + '" value="' + esc(ROLE_LABEL[k] || k) + '" maxlength="60" required aria-label="ชื่อบทบาท ' + esc(k) + '">' +
-      (isSystemRole(k) ? '' : '<div><button type="button" class="btn small bad" data-role-del="' + esc(k) + '">ลบบทบาท</button></div>') + '</th>').join('');
     const body = PERMISSIONS.map((pm) => {
-      const g = pm.group !== group ? '<tr class="perm-group"><td colspan="' + (keys.length + 1) + '">' + esc(pm.group) + '</td></tr>' : '';
+      const g = pm.group !== group ? '<tr class="perm-group"><td colspan="2">' + esc(pm.group) + '</td></tr>' : '';
       group = pm.group;
-      return g + '<tr><td>' + esc(pm.label) + (pm.hint ? '<div class="muted">' + esc(pm.hint) + '</div>' : '') + '</td>' + keys.map((k) => {
-        const locked = k === 'admin' && pm.key === 'user.manage';
-        return '<td class="center"><input type="checkbox" data-role="' + esc(k) + '" data-perm="' + pm.key + '"' + (DEMO_ROLE_PERMS[k].includes(pm.key) ? ' checked' : '') + (locked ? ' disabled title="Admin ต้องมีสิทธิ์นี้เสมอ"' : unknownPerm(pm) ? ' disabled title="ฐานข้อมูลยังไม่รู้จักสิทธิ์นี้ — รัน schema_v2.sql ใหม่"' : '') + ' aria-label="' + esc(ROLE_LABEL[k] + ' — ' + pm.label) + '"></td>';
-      }).join('') + '</tr>';
+      const locked = k === 'admin' && pm.key === 'user.manage';
+      const off = roleUnknownPerm(pm);
+      return g + '<tr><td><strong>' + esc(pm.label) + '</strong>' + (pm.hint ? '<div class="muted">' + esc(pm.hint) + '</div>' : '') + '</td><td class="center"><input type="checkbox" data-perm="' + pm.key + '"' +
+        (draft.has(pm.key) || locked ? ' checked' : '') + (locked ? ' disabled title="Admin ต้องมีสิทธิ์นี้เสมอ"' : off ? ' disabled title="ฐานข้อมูลยังไม่รู้จักสิทธิ์นี้ — รัน schema_v2.sql ใหม่"' : '') + ' aria-label="' + esc((ROLE_LABEL[k] || k) + ' — ' + pm.label) + '"></td></tr>';
     }).join('');
-    return (stale.length ? '<div class="alert warn">ฐานข้อมูล Supabase ยังเป็นเวอร์ชันเก่า ไม่รู้จักสิทธิ์: ' + stale.map((x) => esc(x.label)).join(' · ') + ' — บันทึกแล้วสิทธิ์เหล่านี้จะหาย ให้ผู้ดูแลรัน <code>supabase/schema_v2.sql</code> ใหม่ใน SQL Editor ก่อน (ดู SETUP-v2.md ขั้นตอน 2)</div>' : '') +
-      '<section class="card form-section"><div class="section-head"><div><h2 class="section-title">สิทธิ์ของแต่ละบทบาท</h2><div class="muted section-hint">แก้ชื่อบทบาทที่หัวคอลัมน์ ติ๊กสิทธิ์ แล้วกด "บันทึกสิทธิ์" — มีผลกับผู้ใช้ทุกคนที่อยู่ในบทบาทนั้นทันที (ผู้ใช้ที่ล็อกอินอยู่ต้องรีเฟรชหน้า)</div></div></div>' +
-      '<form id="rolePermForm"><div class="table-wrap"><table class="perm-matrix"><thead><tr><th>สิทธิ์</th>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
-      '<div class="actions"><button class="btn primary" type="submit">บันทึกสิทธิ์</button>' + (AUTH_REMOTE ? '' : '<button class="btn" type="button" data-roles-reset>คืนค่าเริ่มต้น</button>') + '</div></form></section>' +
-      '<section class="card form-section"><div class="section-head"><h2 class="section-title">เพิ่มบทบาท</h2></div>' +
-      '<form id="roleAddForm" novalidate><div class="form-grid"><label class="field"><span>ชื่อบทบาท</span><input name="name" required placeholder="เช่น ผู้ตรวจสอบภายใน"></label></div>' +
-      '<div class="actions"><button class="btn" type="submit">+ เพิ่มบทบาท</button></div></form></section>';
+    panel.innerHTML = '<div class="section-head"><div><h2 class="section-title">' + esc(ROLE_LABEL[k] || k) + '</h2><div class="muted section-hint">' + roleCountText(k) + ' · รหัส ' + esc(k) + (isSystemRole(k) ? ' · บทบาทตั้งต้น' : '') + '</div></div>' +
+      '<div class="head-actions"><button type="button" class="btn small" data-role-rename>แก้ชื่อ</button>' + (isSystemRole(k) ? '' : '<button type="button" class="btn small bad" data-role-delete>ลบบทบาท</button>') + '</div></div>' +
+      '<div class="table-wrap"><table class="perm-matrix"><thead><tr><th>สิทธิ์</th><th class="perm-col">ให้บทบาทนี้</th></tr></thead><tbody>' + body + '</tbody></table></div>' +
+      '<div class="actions role-foot"><span class="badge pending" id="roleDirty" hidden>ยังไม่ได้บันทึก</span><button type="button" class="btn" id="roleCancel" disabled>ยกเลิก</button><button type="button" class="btn primary" id="roleSave" disabled>บันทึก</button></div>';
   }
 
   function bindAdminDemo(box) {
     const app = document.getElementById('app');
     const err = (m) => { document.getElementById('formError').innerHTML = '<div class="alert error">' + esc(m) + '</div>'; window.scrollTo(0, 0); };
     const back = () => go(location.hash);
-    // ----- แท็บบทบาทและสิทธิ์
-    const rp = document.getElementById('rolePermForm');
-    if (rp) {
-      rp.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const map = {};
-        roleKeys().forEach((k) => { map[k] = Array.from(rp.querySelectorAll('[data-role="' + k + '"]:checked')).map((c) => c.dataset.perm); });
-        const names = {};
-        roleKeys().forEach((k) => { const i = rp.querySelector('[data-role-name="' + k + '"]'); if (i) names[k] = i.value; });
-        try { await rolesSavePerms(map, names); setFlash('success', 'บันทึกชื่อและสิทธิ์ของบทบาทแล้ว'); } catch (ex) { err(ex.message); return; }
-        back();
+    // ----- แท็บบทบาทและสิทธิ์ (เลือกบทบาทซ้าย → ติ๊กสิทธิ์ขวา)
+    const roleList = document.getElementById('roleList');
+    if (roleList) {
+      const savedSet = (k) => new Set(DEMO_ROLE_PERMS[k] || []);
+      let draft = savedSet(adminRoleSel);
+      const dirty = () => { const sv = savedSet(adminRoleSel); return sv.size !== draft.size || Array.from(draft).some((x) => !sv.has(x)); };
+      const sync = () => {
+        const d = dirty();
+        document.getElementById('roleDirty').hidden = !d;
+        document.getElementById('roleSave').disabled = !d;
+        document.getElementById('roleCancel').disabled = !d;
+      };
+      const paint = () => { renderRolePanel(draft); sync(); };
+      paint();
+      const permsOfDraft = () => PERMISSIONS.map((p) => p.key).filter((x) => draft.has(x));
+      roleList.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-role-pick]');
+        if (!b || b.dataset.rolePick === adminRoleSel) return;
+        if (dirty() && !confirm('สิทธิ์ของบทบาทนี้ยังไม่ได้บันทึก — ทิ้งการแก้ไขแล้วเปลี่ยนบทบาท?')) return;
+        adminRoleSel = b.dataset.rolePick;
+        roleList.querySelectorAll('[data-role-pick]').forEach((x) => { const on = x.dataset.rolePick === adminRoleSel; x.classList.toggle('active', on); if (on) x.setAttribute('aria-current', 'true'); else x.removeAttribute('aria-current'); });
+        draft = savedSet(adminRoleSel);
+        paint();
       });
-      const rr = rp.querySelector('[data-roles-reset]');
+      const panel = document.getElementById('rolePanel');
+      panel.addEventListener('change', (e) => {
+        const k = e.target.dataset && e.target.dataset.perm;
+        if (!k) return;
+        if (e.target.checked) draft.add(k); else draft.delete(k);
+        sync();
+      });
+      panel.addEventListener('click', async (e) => {
+        const btn = e.target.closest('button');
+        if (!btn || btn.disabled) return;
+        if (btn.id === 'roleCancel') { draft = savedSet(adminRoleSel); paint(); }
+        else if (btn.id === 'roleSave') {
+          btn.disabled = true;
+          try {
+            await rolesSavePerms({ [adminRoleSel]: permsOfDraft() });
+            setFlash('success', 'บันทึกสิทธิ์ของ "' + (ROLE_LABEL[adminRoleSel] || adminRoleSel) + '" แล้ว');
+          } catch (ex) { btn.disabled = false; err(ex.message); return; }
+          back();
+        } else if (btn.matches('[data-role-rename]')) openRoleForm('rename');
+        else if (btn.matches('[data-role-delete]')) {
+          const n = roleUserCount(adminRoleSel);
+          if (n) { err('ลบบทบาทนี้ไม่ได้ — ยังมีผู้ใช้ ' + n + ' คนใช้อยู่ ย้ายผู้ใช้ไปบทบาทอื่นก่อน'); return; }
+          if (!confirm('ลบบทบาท "' + (ROLE_LABEL[adminRoleSel] || adminRoleSel) + '" ?')) return;
+          try { await rolesRemove(adminRoleSel); setFlash('success', 'ลบบทบาทแล้ว'); } catch (ex) { err(ex.message); return; }
+          adminRoleSel = '';
+          back();
+        }
+      });
+      const rr = app.querySelector('[data-roles-reset]');
       if (rr) rr.addEventListener('click', async () => {
-        if (!confirm('คืนสิทธิ์ของบทบาทตั้งต้นเป็นค่าเริ่มต้น? (บทบาทที่สร้างเพิ่มไม่ถูกแตะ)')) return;
+        if (!confirm('คืนสิทธิ์และชื่อของบทบาทตั้งต้นเป็นค่าเริ่มต้น? (บทบาทที่สร้างเพิ่มไม่ถูกแตะ)')) return;
         try { await rolesReset(); setFlash('success', 'คืนค่าเริ่มต้นแล้ว'); } catch (ex) { err(ex.message); return; }
         back();
       });
-      rp.querySelectorAll('[data-role-del]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm('ลบบทบาท "' + ROLE_LABEL[b.dataset.roleDel] + '" ?')) return;
-        try { await rolesRemove(b.dataset.roleDel); setFlash('success', 'ลบบทบาทแล้ว'); } catch (ex) { err(ex.message); return; }
-        back();
-      }));
-      document.getElementById('roleAddForm').addEventListener('submit', async (e) => {
+      // ----- Modal สร้าง / แก้ชื่อบทบาท
+      const card = document.getElementById('roleFormCard'), form = document.getElementById('roleForm');
+      let mode = 'new';
+      const errModal = (m) => { document.getElementById('roleFormError').innerHTML = '<div class="alert error" role="alert">' + esc(m) + '</div>'; };
+      const onEsc = (e) => { if (e.key === 'Escape') closeRoleForm(); };
+      function closeRoleForm() { card.hidden = true; document.getElementById('roleFormError').innerHTML = ''; document.removeEventListener('keydown', onEsc); }
+      function openRoleForm(m) {
+        mode = m;
+        form.reset();
+        document.getElementById('roleFormError').innerHTML = '';
+        document.getElementById('roleFormTitle').textContent = m === 'new' ? 'สร้างบทบาท' : 'แก้ชื่อบทบาท';
+        document.getElementById('roleFormSave').textContent = m === 'new' ? 'สร้าง' : 'บันทึก';
+        document.getElementById('roleCopyField').hidden = m !== 'new';
+        if (m === 'rename') form.elements.name.value = ROLE_LABEL[adminRoleSel] || adminRoleSel;
+        card.hidden = false;
+        document.addEventListener('keydown', onEsc);
+        form.elements.name.focus();
+      }
+      app.querySelector('[data-role-new]').addEventListener('click', () => {
+        if (dirty() && !confirm('สิทธิ์ของบทบาทนี้ยังไม่ได้บันทึก — ทิ้งการแก้ไขแล้วสร้างบทบาทใหม่?')) return;
+        openRoleForm('new');
+      });
+      card.addEventListener('click', (e) => { if (e.target === card || e.target.closest('[data-role-close], [data-role-cancel]')) closeRoleForm(); });
+      form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        try { await rolesCreate(e.target.elements.name.value); setFlash('success', 'เพิ่มบทบาทแล้ว — ติ๊กสิทธิ์ให้บทบาทนี้ในตารางด้านบน'); } catch (ex) { err(ex.message); return; }
+        const name = form.elements.name.value.trim();
+        const copy = form.elements.copy.value;
+        const submitBtn = document.getElementById('roleFormSave');
+        submitBtn.disabled = true;
+        try {
+          if (mode === 'new') {
+            const key = await rolesCreate(name);
+            if (copy) await rolesSavePerms({ [key]: (DEMO_ROLE_PERMS[copy] || []).filter((x) => x !== 'user.manage') });
+            adminRoleSel = key;
+            setFlash('success', 'สร้างบทบาท ' + name + ' แล้ว' + (copy ? ' (คัดลอกสิทธิ์แล้ว)' : ' — ติ๊กสิทธิ์ทางขวา'));
+          } else {
+            // แก้ชื่อ: คงสิทธิ์ที่บันทึกไว้ (สิทธิ์ที่ติ๊กค้างอยู่ยังไม่ถูกบันทึก)
+            await rolesSavePerms({ [adminRoleSel]: DEMO_ROLE_PERMS[adminRoleSel] || [] }, { [adminRoleSel]: name });
+            setFlash('success', 'แก้ชื่อบทบาทเป็น ' + name + ' แล้ว');
+          }
+        } catch (ex) { submitBtn.disabled = false; errModal(ex.message); return; }
+        closeRoleForm();
         back();
       });
       return;
