@@ -97,7 +97,11 @@ function startFake(options) {
         const keys = Object.keys(body);
         const bad = keys.find((k) => !(names || []).includes(k));
         if (bad) return send(res, 404, { code: 'PGRST202', message: 'Could not find the function public.' + fn + ' with parameter ' + bad });
-        const args = keys.map((k, i) => `${k} => $${i + 1}::${types[names.indexOf(k)]}`).join(', ');
+        // PostgREST แปลง JSON array → text[] ให้เอง — จำลองด้วย jsonb_array_elements_text
+        const isArr = (k) => /\[\]$/.test(types[names.indexOf(k)]) && Array.isArray(body[k]);
+        const args = keys.map((k, i) => (isArr(k)
+          ? `${k} => array(select jsonb_array_elements_text($${i + 1}::jsonb))::${types[names.indexOf(k)]}`
+          : `${k} => $${i + 1}::${types[names.indexOf(k)]}`)).join(', ');
         const vals = keys.map((k) => (body[k] === null ? null : typeof body[k] === 'object' ? JSON.stringify(body[k]) : String(body[k])));
         const client = await pool.connect();
         try {

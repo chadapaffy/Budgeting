@@ -814,6 +814,7 @@
   }
 
   let accountsReady = false; // โหมด Supabase: โหลดบัญชี/บทบาทของผู้ใช้ที่ล็อกอินแล้ว
+  let remotePermCatalog = null; // สิทธิ์ที่ฐานข้อมูลรู้จัก (ถ้าฐานข้อมูลยังเป็นเวอร์ชันเก่า สิทธิ์ใหม่จะถูกทิ้งตอนบันทึก)
   const remoteRoleSys = {};  // roleKey → true ถ้าเป็นบทบาทตั้งต้นของระบบ (ลบไม่ได้)
   const profileToUser = (p) => Object.assign({}, p, {
     company: p.company || '', companies: Array.isArray(p.companies) ? p.companies : [],
@@ -822,6 +823,7 @@
   });
   async function loadRemoteRoles() {
     const r = await window.RemoteApi.v2ListRoles();
+    remotePermCatalog = Array.isArray(r.catalog) ? r.catalog.slice() : null;
     Object.keys(DEMO_ROLE_PERMS).forEach((k) => { delete DEMO_ROLE_PERMS[k]; });
     Object.keys(remoteRoleSys).forEach((k) => { delete remoteRoleSys[k]; });
     r.roles.forEach((x) => { DEMO_ROLE_PERMS[x.key] = x.permissions.slice(); ROLE_LABEL[x.key] = x.name; remoteRoleSys[x.key] = !!x.isSystem; });
@@ -6596,6 +6598,8 @@
   function viewAdminRoles() {
     const keys = roleKeys();
     let group = '';
+    const unknownPerm = (pm) => AUTH_REMOTE && remotePermCatalog && !remotePermCatalog.includes(pm.key);
+    const stale = PERMISSIONS.filter(unknownPerm);
     const head = keys.map((k) => '<th class="center perm-col"><input data-role-name="' + esc(k) + '" value="' + esc(ROLE_LABEL[k] || k) + '" maxlength="60" required aria-label="ชื่อบทบาท ' + esc(k) + '">' +
       (isSystemRole(k) ? '' : '<div><button type="button" class="btn small bad" data-role-del="' + esc(k) + '">ลบบทบาท</button></div>') + '</th>').join('');
     const body = PERMISSIONS.map((pm) => {
@@ -6603,10 +6607,11 @@
       group = pm.group;
       return g + '<tr><td>' + esc(pm.label) + (pm.hint ? '<div class="muted">' + esc(pm.hint) + '</div>' : '') + '</td>' + keys.map((k) => {
         const locked = k === 'admin' && pm.key === 'user.manage';
-        return '<td class="center"><input type="checkbox" data-role="' + esc(k) + '" data-perm="' + pm.key + '"' + (DEMO_ROLE_PERMS[k].includes(pm.key) ? ' checked' : '') + (locked ? ' disabled title="Admin ต้องมีสิทธิ์นี้เสมอ"' : '') + ' aria-label="' + esc(ROLE_LABEL[k] + ' — ' + pm.label) + '"></td>';
+        return '<td class="center"><input type="checkbox" data-role="' + esc(k) + '" data-perm="' + pm.key + '"' + (DEMO_ROLE_PERMS[k].includes(pm.key) ? ' checked' : '') + (locked ? ' disabled title="Admin ต้องมีสิทธิ์นี้เสมอ"' : unknownPerm(pm) ? ' disabled title="ฐานข้อมูลยังไม่รู้จักสิทธิ์นี้ — รัน schema_v2.sql ใหม่"' : '') + ' aria-label="' + esc(ROLE_LABEL[k] + ' — ' + pm.label) + '"></td>';
       }).join('') + '</tr>';
     }).join('');
-    return '<section class="card form-section"><div class="section-head"><div><h2 class="section-title">สิทธิ์ของแต่ละบทบาท</h2><div class="muted section-hint">แก้ชื่อบทบาทที่หัวคอลัมน์ ติ๊กสิทธิ์ แล้วกด "บันทึกสิทธิ์" — มีผลกับผู้ใช้ทุกคนที่อยู่ในบทบาทนั้นทันที (ผู้ใช้ที่ล็อกอินอยู่ต้องรีเฟรชหน้า)</div></div></div>' +
+    return (stale.length ? '<div class="alert warn">ฐานข้อมูล Supabase ยังเป็นเวอร์ชันเก่า ไม่รู้จักสิทธิ์: ' + stale.map((x) => esc(x.label)).join(' · ') + ' — บันทึกแล้วสิทธิ์เหล่านี้จะหาย ให้ผู้ดูแลรัน <code>supabase/schema_v2.sql</code> ใหม่ใน SQL Editor ก่อน (ดู SETUP-v2.md ขั้นตอน 2)</div>' : '') +
+      '<section class="card form-section"><div class="section-head"><div><h2 class="section-title">สิทธิ์ของแต่ละบทบาท</h2><div class="muted section-hint">แก้ชื่อบทบาทที่หัวคอลัมน์ ติ๊กสิทธิ์ แล้วกด "บันทึกสิทธิ์" — มีผลกับผู้ใช้ทุกคนที่อยู่ในบทบาทนั้นทันที (ผู้ใช้ที่ล็อกอินอยู่ต้องรีเฟรชหน้า)</div></div></div>' +
       '<form id="rolePermForm"><div class="table-wrap"><table class="perm-matrix"><thead><tr><th>สิทธิ์</th>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
       '<div class="actions"><button class="btn primary" type="submit">บันทึกสิทธิ์</button>' + (AUTH_REMOTE ? '' : '<button class="btn" type="button" data-roles-reset>คืนค่าเริ่มต้น</button>') + '</div></form></section>' +
       '<section class="card form-section"><div class="section-head"><h2 class="section-title">เพิ่มบทบาท</h2></div>' +
