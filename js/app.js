@@ -2295,7 +2295,8 @@
     // ---- Plan Cashflow (CAPEX ที่เปิดใช้แล้ว)
     if (isCapex && active) {
       items += '<h2>Plan Cashflow (ประมาณการใช้เงินรายเดือน)</h2>' + (hasCashflow(b)
-        ? '<section class="card">' + cashflowSummary(b) + '</section>'
+        ? (cashflowDue(b) && canPlanCashflow(b) ? '<div class="alert warn">เดือน ' + esc(monthLabel(curYm())) + ' ยังไม่มีแผน Cashflow — <a href="#/budget/' + b.id + '/cashflow">วางแผน</a> หรือกด "เดือนนี้ไม่มีแผน" ที่งานทั้งหมด</div>' : '') +
+          '<section class="card">' + cashflowSummary(b) + '</section>'
         : '<div class="alert ' + (canPlanCashflow(b) && actsFor(b) ? 'warn' : 'info') + '">ยังไม่ได้วาง Plan Cashflow' +
           (canPlanCashflow(b) ? ' — <a href="#/budget/' + b.id + '/cashflow">วางแผนว่าแต่ละ Item จะใช้เงินเดือนไหนเท่าไร</a>' : '') + '</div>');
     }
@@ -3380,6 +3381,39 @@
   const planOf = (b, itemId, ym) => Number(((b.cashflow || {})[itemId] || {})[ym] || 0);
   const planItemTotal = (b, itemId) => round2(Object.values((b.cashflow || {})[itemId] || {}).reduce((s, v) => s + Number(v || 0), 0));
   const hasCashflow = (b) => Object.values(b.cashflow || {}).some((m) => Object.values(m).some((v) => Number(v) > 0));
+  /** เดือนปัจจุบัน 'YYYY-MM' */
+  const curYm = () => today().slice(0, 7);
+  /**
+   * ถึงเวลาวาง Plan Cashflow: งบ CAPEX ที่เปิดใช้แล้ว เดือนปัจจุบันอยู่ในปีงบ แต่ยังไม่มีแผนของเดือนนี้เลย (ทุก Item เป็น 0)
+   * และยังไม่ได้กด "เดือนนี้ไม่มีแผน" → ขึ้นเป็นงานของ Business เจ้าของงบ (ธุรการเห็นแทน)
+   */
+  const cashflowDue = (b) => {
+    const ym = curYm();
+    return b.type === 'CAPEX' && isActive(b) && fyMonths(b).includes(ym) && !ledgerItems(b).some((it) => planOf(b, it.id, ym) > 0) && !(b.cashflowSkip || {})[ym];
+  };
+  /** งบที่ผู้ใช้ต้องวาง Plan Cashflow เดือนนี้ (เจ้าของงบ / ธุรการ) */
+  const cashflowTodo = () => db.budgets.filter((b) => actsFor(b) && can('request.create') && canPlanCashflow(b) && cashflowDue(b));
+  function cashflowTable(list) {
+    if (!list.length) return '<div class="card empty">ไม่มีรายการ</div>';
+    return '<div class="table-wrap"><table><thead><tr><th>งบ</th><th>บริษัท / ปี</th><th class="num">วงเงิน</th><th>เดือนนี้</th><th></th></tr></thead><tbody>' +
+      list.map((b) => '<tr><td>' + badge(b.type, TYPE_SHORT[b.type]) + ' <a href="#/budget/' + b.id + '">' + esc(b.code) + '</a><div class="muted">' + esc(b.name) + '</div></td>' +
+        '<td class="nowrap">' + esc(b.company) + ' · ' + esc(b.fiscalYear) + '</td><td class="num">' + money(budgetTotal(b)) + '</td>' +
+        '<td class="nowrap">' + esc(monthLabel(curYm())) + '<div class="muted">ยังไม่มีแผน</div></td>' +
+        '<td class="num nowrap"><a class="btn small primary" href="#/budget/' + b.id + '/cashflow">วาง Plan Cashflow</a> ' +
+        '<button type="button" class="btn small" data-cf-skip="' + b.id + '">เดือนนี้ไม่มีแผน</button></td></tr>').join('') + '</tbody></table></div>';
+  }
+  function bindCashflowTask() {
+    document.querySelectorAll('[data-cf-skip]').forEach((btn) => btn.addEventListener('click', () => {
+      const b = budgetById(btn.dataset.cfSkip);
+      const ym = curYm();
+      if (!b || !canPlanCashflow(b) || !confirm('ยืนยันว่า ' + b.code + ' เดือน ' + monthLabel(ym) + ' ไม่มีแผนใช้เงิน? (งานนี้จะหายไป)')) return;
+      b.cashflowSkip = Object.assign({}, b.cashflowSkip, { [ym]: { by: me().id, at: new Date().toISOString() } });
+      addHistory(b, 'ยืนยันเดือน ' + monthLabel(ym) + ' ไม่มีแผน Cashflow', '', 'งบ ' + b.code);
+      save();
+      setFlash('success', 'บันทึกแล้ว — ' + b.code + ' เดือน ' + monthLabel(ym) + ' ไม่มีแผน Cashflow');
+      go(location.hash);
+    }));
+  }
   /** ยอดตัดงบจริงรายเดือนของงบ (แยก Item ได้): ใบที่มีหลาย Item แบ่งตามสัดส่วนยอดของบรรทัด */
   function actualByMonth(b, itemId) {
     const out = {};
@@ -5691,7 +5725,8 @@
         task('งบรอผู้คุมงบยืนยัน', mineB.filter((b) => b.state === 'review' || b.state === 'open_review').length, '#/tasks?tab=waiting'));
     }
     if (can('request.create')) {
-      tasks.push(task('รอเคลียร์เงินทดรอง', mineReq.filter(needsClear).length, '#/tasks?tab=clear', 'ผู้คุมงบอนุมัติแล้ว — เคลียร์ตามใบเสร็จเพื่อตัดงบ'),
+      tasks.push(task('วาง Plan Cashflow เดือนนี้', cashflowTodo().length, '#/tasks?tab=cashflow', 'งบ CAPEX ที่เปิดใช้แล้ว เดือน ' + monthLabel(curYm()) + ' ยังไม่มีแผน'),
+        task('รอเคลียร์เงินทดรอง', mineReq.filter(needsClear).length, '#/tasks?tab=clear', 'ผู้คุมงบอนุมัติแล้ว — เคลียร์ตามใบเสร็จเพื่อตัดงบ'),
         task('คำขอของฉันที่รอผู้คุมงบตรวจสอบ', mineReq.filter((r) => r.status === 'pending').length, '#/tasks?tab=waiting'),
         task('ส่งกลับแก้ไข', mineReq.filter((r) => r.status === 'rejected').length + db.budgets.filter((b) => actsFor(b) && (b.state === 'returned' || b.state === 'open_returned')).length, '#/tasks?tab=fix'),
         task('ออกใบเบิกใช้งบแล้ว รอปิดยอด', mineReq.filter((r) => r.status === 'approved').length, '#/tasks?tab=open'));
@@ -6478,6 +6513,8 @@
         sec('งบ', mineB.filter((b) => b.state === 'review' || b.state === 'open_review'), myBudgetTable),
         sec('คำขอเบิกใช้งบ', mineR.filter((r) => r.status === 'pending'), (l) => requestTable(l, true)),
         sec('คำขอเพิ่มงบ', mineC.filter((c) => c.state === 'review'), changeQueueTable)]);
+      add('cashflow', 'Plan Cashflow เดือนนี้', true, 'งบ CAPEX ที่เปิดใช้แล้ว ถึงเดือน ' + monthLabel(curYm()) + ' แล้วแต่ยังไม่มีแผนใช้เงินของเดือนนี้ — วางแผน หรือกด "เดือนนี้ไม่มีแผน"',
+        [sec('', cashflowTodo(), cashflowTable)]);
       add('clear', 'รอเคลียร์เงินทดรอง', true, 'ผู้คุมงบอนุมัติ = จ่ายเงินทดรองแล้ว — Business / ธุรการเคลียร์ตามใบเสร็จ งบจะถูกตัดตามยอดที่เคลียร์',
         [sec('', mineR.filter(needsClear), (l) => cutQueueTable(l, false))]);
       add('open', 'รอปิดยอด', false, 'ออกใบเบิกใช้งบแล้ว รอออก PO / เคลียร์เงินทดรอง และปิดยอด',
@@ -7314,6 +7351,7 @@
     bindCashflow();
     bindBreakdown();
     bindOpenPick();
+    bindCashflowTask();
     bindGl();
     bindImport();
     bindExport();
