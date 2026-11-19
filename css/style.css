@@ -1192,3 +1192,16 @@ button.link { color: var(--brand); }
 .sync-bar .actions { margin-top: var(--s-2); }
 /* หัวกลุ่มในเมนูซ้าย (เช่น ผู้ดูแลระบบ) — ใช้ .nav-label เดิม เว้นระยะด้านบนเท่านั้น */
 #nav .nav-label.nav-group { margin-top: var(--s-5); }
+
+/* Admin → บทบาทและสิทธิ์: เลือกบทบาทซ้าย · ติ๊กสิทธิ์ขวา (สี/ฟอนต์ใช้ token เดิม เหมือนรายการเมนูซ้าย) */
+.role-split { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: var(--s-5); align-items: start; margin-top: var(--s-4); }
+.role-list { display: flex; flex-direction: column; gap: 2px; }
+.role-item { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); width: 100%; min-height: 40px; padding: 0 var(--s-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; font-size: var(--fs-base); text-align: left; cursor: pointer; }
+.role-item strong { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.role-item span { flex: none; font-size: var(--fs-xs); color: var(--muted); }
+.role-item:hover { background: var(--surface-2); }
+.role-item.active { background: var(--app-accent-soft); color: var(--app-accent); }
+.role-item.active span { color: var(--app-accent); }
+.role-list-card .actions { margin-top: var(--s-3); }
+.role-foot { justify-content: flex-end; align-items: center; }
+@media (max-width: 900px) { .role-split { grid-template-columns: 1fr; } }
