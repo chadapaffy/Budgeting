@@ -49,16 +49,21 @@ revoke all on public.v2_roles, public.v2_profiles from anon, authenticated;
 create or replace function public._v2_perm_catalog() returns text[]
 language sql immutable set search_path = public as $$
   select array['budget.view_all', 'budget.create', 'request.create', 'budget.verify', 'budget.adjust', 'budget.manage',
-               'request.decide', 'cut.record', 'po.record', 'master.manage', 'data.export', 'log.view', 'user.manage']
+               'request.decide', 'cut.record', 'po.record', 'master.manage', 'data.export', 'log.view', 'user.manage',
+               'business.proxy', 'gl.manage']
 $$;
 
 -- บทบาทตั้งต้น (ไม่เขียนทับถ้า Admin แก้สิทธิ์ไว้แล้ว)
 insert into public.v2_roles (key, name, description, permissions, is_system) values
   ('business',   'Business (ผู้ขอใช้งบ)',     '', array['budget.create', 'request.create'], true),
-  ('controller', 'ผู้คุมงบ (บัญชีการเงิน)',    '', array['budget.view_all', 'budget.manage', 'budget.verify', 'budget.adjust', 'request.decide', 'cut.record', 'data.export'], true),
+  ('controller', 'ผู้คุมงบ',                   '', array['budget.view_all', 'budget.manage', 'budget.verify', 'budget.adjust', 'request.decide', 'cut.record', 'data.export'], true),
+  ('accountant', 'บัญชี',                       '', array['budget.view_all', 'gl.manage', 'data.export'], true),
+  ('assistant',  'Admin ผู้ช่วย Business (ธุรการ)', '', array['budget.create', 'request.create', 'business.proxy'], true),
   ('purchasing', 'จัดซื้อ',                    '', array['budget.view_all', 'po.record'], true),
   ('admin',      'ผู้ดูแลระบบ (Admin)',        '', array['budget.view_all', 'master.manage', 'log.view', 'user.manage', 'data.export'], true)
 on conflict (key) do nothing;
+-- เปลี่ยนชื่อบทบาทผู้คุมงบ (ตัดวงเล็บ) — เฉพาะที่ยังเป็นชื่อตั้งต้นเดิม ไม่ทับชื่อที่ Admin ตั้งเอง
+update public.v2_roles set name = 'ผู้คุมงบ' where key = 'controller' and name = 'ผู้คุมงบ (บัญชีการเงิน)';
 
 /** ผู้ใช้ที่ล็อกอินอยู่ (ต้อง active) */
 create or replace function public._v2_user() returns public.v2_profiles
