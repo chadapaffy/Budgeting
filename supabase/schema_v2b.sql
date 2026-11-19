@@ -57,7 +57,7 @@ revoke all on public.v2_docs, public.v2_counters, public.v2_log from anon, authe
 /** บทบาทที่ต้องเห็นงานของคนอื่น — ต้องตรงกับ canViewAll() ใน js/app.js */
 create or replace function public._v2_sees_all(p_role text) returns boolean
 language sql stable security definer set search_path = public as $$
-  select public._v2_perms(p_role) && array['budget.view_all', 'budget.manage', 'budget.verify', 'request.decide', 'cut.record', 'po.record']
+  select public._v2_perms(p_role) && array['budget.view_all', 'budget.manage', 'budget.verify', 'request.decide', 'cut.record', 'po.record', 'business.proxy', 'gl.manage']
 $$;
 
 /** ขอบเขตบริษัท — ต้องตรงกับ companyScope() ใน js/app.js (Admin เห็นทุกบริษัท) */
@@ -78,9 +78,9 @@ $$;
 create or replace function public._v2_can_write(p_role text, p_kind text) returns boolean
 language sql stable security definer set search_path = public as $$
   select case p_kind
-    when 'budget'  then public._v2_perms(p_role) && array['budget.create', 'budget.manage', 'budget.verify', 'budget.adjust', 'request.create']
-    when 'request' then public._v2_perms(p_role) && array['request.create', 'request.decide', 'cut.record', 'po.record', 'budget.manage', 'budget.verify']
-    when 'change'  then public._v2_perms(p_role) && array['budget.create', 'request.create', 'budget.verify', 'budget.manage', 'budget.adjust']
+    when 'budget'  then public._v2_perms(p_role) && array['budget.create', 'budget.manage', 'budget.verify', 'budget.adjust', 'request.create', 'business.proxy', 'gl.manage']
+    when 'request' then public._v2_perms(p_role) && array['request.create', 'request.decide', 'cut.record', 'po.record', 'budget.manage', 'budget.verify', 'business.proxy']
+    when 'change'  then public._v2_perms(p_role) && array['budget.create', 'request.create', 'budget.verify', 'budget.manage', 'budget.adjust', 'business.proxy']
     else false
   end
 $$;
@@ -163,6 +163,18 @@ begin
         if b.id is null then raise exception 'ไม่พบงบที่อ้างอิง (%)', bud; end if;
         comp := b.company; own := b.owner_id;
         if v_kind = 'request' then req := coalesce(d -> 'data' ->> 'requesterId', ''); end if;
+      end if;
+      if v_kind = 'budget' then
+        -- ธุรการ (business.proxy) เป็นเจ้าของงบไม่ได้
+        if own <> '' and exists (select 1 from public.v2_profiles pp where pp.id::text = own and 'business.proxy' = any (public._v2_perms(pp.role))) then
+          raise exception 'ธุรการเป็นเจ้าของงบไม่ได้ — เลือก Business เจ้าของงบ' using errcode = '42501';
+        end if;
+        -- ธุรการเปลี่ยนสถานะงบไปขั้นอนุมัติ / เปิดใช้ไม่ได้ (ทั้งสร้างใหม่และแก้ของเดิม) — สถานะเดิมที่ไม่เปลี่ยนแก้ข้อมูลอื่นได้
+        if 'business.proxy' = any (public._v2_perms(u.role))
+           and coalesce(d -> 'data' ->> 'state', '') in ('pending_open', 'open_review', 'open_returned', 'active')
+           and coalesce(d -> 'data' ->> 'state', '') is distinct from (case when ex.id is not null and not ex.deleted then coalesce(ex.data ->> 'state', '') end) then
+          raise exception 'ธุรการอนุมัติหรือเปิดใช้งบไม่ได้ — เปิดใช้งบครั้งแรกต้องเป็น Business เจ้าของงบ' using errcode = '42501';
+        end if;
       end if;
       if not public._v2_doc_visible(u, v_kind, comp, own, req) then
         raise exception 'ไม่มีสิทธิ์บันทึกเอกสารนี้ (นอกขอบเขตบริษัท/เจ้าของ) (%/%)', v_kind, v_id using errcode = '42501';

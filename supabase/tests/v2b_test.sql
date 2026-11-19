@@ -3,7 +3,7 @@
 \set ON_ERROR_STOP on
 
 insert into auth.users (id, email)
-select ('00000000-0000-0000-0000-0000000000' || lpad(g::text, 2, '0'))::uuid, 'u' || g || '@example.com' from generate_series(1, 8) g;
+select ('00000000-0000-0000-0000-0000000000' || lpad(g::text, 2, '0'))::uuid, 'u' || g || '@example.com' from generate_series(1, 11) g;
 -- 01 admin · 02 ผู้คุมงบ PBI · 03 ผู้คุมงบ PCC · 04 จัดซื้อ PBI · 05 business1 · 06 business2 · 07 ผู้คุมงบที่ปิดใช้งาน · 08 ผู้คุมงบไม่มีบริษัท
 insert into public.v2_profiles (id, email, name, role, companies, active) values
   ('00000000-0000-0000-0000-000000000001', 'u1@example.com', 'Admin', 'admin', '{}', true),
@@ -13,7 +13,10 @@ insert into public.v2_profiles (id, email, name, role, companies, active) values
   ('00000000-0000-0000-0000-000000000005', 'u5@example.com', 'Biz1', 'business', '{}', true),
   ('00000000-0000-0000-0000-000000000006', 'u6@example.com', 'Biz2', 'business', '{}', true),
   ('00000000-0000-0000-0000-000000000007', 'u7@example.com', 'Off', 'controller', '{PBI}', false),
-  ('00000000-0000-0000-0000-000000000008', 'u8@example.com', 'NoCo', 'controller', '{}', true);
+  ('00000000-0000-0000-0000-000000000008', 'u8@example.com', 'NoCo', 'controller', '{}', true),
+  ('00000000-0000-0000-0000-000000000009', 'u9@example.com', 'AstPBI', 'assistant', '{PBI}', true),
+  ('00000000-0000-0000-0000-000000000010', 'u10@example.com', 'AccPBI', 'accountant', '{PBI}', true),
+  ('00000000-0000-0000-0000-000000000011', 'u11@example.com', 'AstPCC', 'assistant', '{PCC}', true);
 grant usage on schema public to anon, authenticated;
 
 create or replace function pg_temp.as_user(n int) returns void language plpgsql as $$
@@ -153,6 +156,35 @@ end $$;
 reset role;
 select pg_temp.ok((select by_id::text from public.v2_log where action = 'ปลอมผู้ทำ') = '00000000-0000-0000-0000-000000000002', 'Log บันทึกผู้ทำเป็นผู้ล็อกอิน ไม่เชื่อค่าจากเบราว์เซอร์');
 set role authenticated;
+
+-- ---------------------------------------------------------------- ธุรการ (business.proxy) และบัญชี (gl.manage)
+select pg_temp.as_user(9);
+select pg_temp.ok(pg_temp.ids(public.v2_load(), 'budget') like '%b1%', 'ธุรการ PBI เห็นงบของ Business ในบริษัทตัวเอง');
+select pg_temp.as_user(11);
+select pg_temp.ok(pg_temp.ids(public.v2_load(), 'budget') = '', 'ธุรการ PCC ไม่เห็นงบ PBI');
+select pg_temp.expect_fail($$select public.v2_save_docs('[{"kind":"budget","id":"b1","version":2,"data":{"company":"PBI","ownerId":"00000000-0000-0000-0000-000000000005","code":"A","by":"astPCC"}}]')$$, 'ธุรการ PCC แก้งบ PBI ไม่ได้', 'ไม่มีสิทธิ์');
+select pg_temp.as_user(9);
+select pg_temp.expect_fail($$select public.v2_save_docs('[{"kind":"budget","id":"bP0","version":0,"data":{"company":"PBI","ownerId":"00000000-0000-0000-0000-000000000009","code":"P0"}}]')$$, 'ธุรการเป็นเจ้าของงบเองไม่ได้', 'ธุรการเป็นเจ้าของงบไม่ได้');
+select public.v2_save_docs('[{"kind":"budget","id":"bP1","version":0,"data":{"company":"PBI","ownerId":"00000000-0000-0000-0000-000000000005","code":"P1","state":"draft"}}]');
+select pg_temp.ok(pg_temp.ids(public.v2_load(), 'budget') like '%bP1%', 'ธุรการสร้างร่างงบให้ Business ได้');
+select public.v2_save_docs('[{"kind":"budget","id":"bP1","version":1,"data":{"company":"PBI","ownerId":"00000000-0000-0000-0000-000000000005","code":"P1","state":"review"}}]');
+select pg_temp.expect_fail($$select public.v2_save_docs('[{"kind":"budget","id":"bP1","version":2,"data":{"company":"PBI","ownerId":"00000000-0000-0000-0000-000000000005","code":"P1","state":"active"}}]')$$, 'ธุรการเปิดใช้งบ (active) ไม่ได้', 'เปิดใช้งบครั้งแรกต้องเป็น Business');
+select pg_temp.expect_fail($$select public.v2_save_docs('[{"kind":"budget","id":"bP2","version":0,"data":{"company":"PBI","ownerId":"00000000-0000-0000-0000-000000000005","code":"P2","state":"open_review"}}]')$$, 'ธุรการสร้างงบที่ขอเปิดแล้วเลยไม่ได้', 'เปิดใช้งบครั้งแรกต้องเป็น Business');
+select public.v2_save_docs('[{"kind":"request","id":"rP","version":0,"data":{"budgetId":"b1","requesterId":"00000000-0000-0000-0000-000000000005","proxyBy":"00000000-0000-0000-0000-000000000009"}}]');
+select pg_temp.ok(pg_temp.ids(public.v2_load(), 'request') like '%rP%', 'ธุรการทำคำขอเบิกในนามเจ้าของงบได้');
+select pg_temp.as_user(5);
+select pg_temp.ok(pg_temp.ids(public.v2_load(), 'request') like '%rP%', 'Business เจ้าของงบเห็นคำขอที่ธุรการทำแทน');
+select pg_temp.as_user(2);
+select public.v2_save_docs('[{"kind":"budget","id":"bP1","version":2,"data":{"company":"PBI","ownerId":"00000000-0000-0000-0000-000000000005","code":"P1","state":"pending_open"}}]');
+select pg_temp.as_user(9);
+select pg_temp.expect_fail($$select public.v2_save_docs('[{"kind":"budget","id":"bP1","version":3,"data":{"company":"PBI","ownerId":"00000000-0000-0000-0000-000000000005","code":"P1","state":"open_review"}}]')$$, 'ธุรการส่ง Memo ขอเปิดใช้งบแทน Business ไม่ได้', 'เปิดใช้งบครั้งแรกต้องเป็น Business');
+select pg_temp.as_user(5);
+select public.v2_save_docs('[{"kind":"budget","id":"bP1","version":3,"data":{"company":"PBI","ownerId":"00000000-0000-0000-0000-000000000005","code":"P1","state":"open_review"}}]');
+select pg_temp.as_user(10);
+select pg_temp.ok(pg_temp.ids(public.v2_load(), 'budget') like '%bP1%', 'บัญชี PBI เห็นงบของบริษัทตัวเอง');
+select public.v2_save_docs('[{"kind":"budget","id":"bP1","version":4,"data":{"company":"PBI","ownerId":"00000000-0000-0000-0000-000000000005","code":"P1","state":"open_review","gl":"510101"}}]');
+select pg_temp.ok((select x -> 'data' ->> 'gl' from jsonb_array_elements(public.v2_load() -> 'docs') x where x ->> 'id' = 'bP1') = '510101', 'บัญชีบันทึก GL ในเอกสารงบได้');
+select pg_temp.expect_fail($$select public.v2_save_docs('[{"kind":"request","id":"rQ","version":0,"data":{"budgetId":"b1","requesterId":"00000000-0000-0000-0000-000000000005"}}]')$$, 'บัญชีสร้างคำขอเบิกไม่ได้', 'ไม่มีสิทธิ์บันทึกเอกสารชนิดนี้');
 
 -- ---------------------------------------------------------------- เรียกตรงๆ ไม่ได้
 select pg_temp.as_user(5);
