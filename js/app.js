@@ -164,9 +164,9 @@
   /** ประเภทการเบิกใช้งบ (CAPEX) และจังหวะที่ตัดงบจริง */
   const USE_TYPES = {
     prpo: { label: 'ซื้อโดยเปิด PR / PO', short: 'PR/PO', cut: 'ตัดงบเมื่อจัดซื้อออก PO (ตามยอด PO)', who: 'จัดซื้อ' },
-    advance: { label: 'Advance (เงินทดรอง)', short: 'Advance', cut: 'ตัดงบเมื่อเคลียร์เงินทดรองพร้อมใบเสร็จ', who: 'ผู้คุมงบ' },
-    reimburse: { label: 'พนักงานสำรองจ่าย', short: 'สำรองจ่าย', cut: 'ตัดงบเมื่อจ่ายคืนพนักงานตามใบเสร็จ', who: 'ผู้คุมงบ' },
-    direct: { label: 'จ่ายตรงให้ Supplier', short: 'จ่ายตรง', cut: 'ตัดงบเมื่อจ่ายเงินให้ Supplier', who: 'ผู้คุมงบ', hint: 'ค่าแรง · จ้างเหมา · จ่ายรายวัน · ค่าน้ำมัน · Stock' }
+    advance: { label: 'Advance (เงินทดรอง)', short: 'Advance', cut: 'ผู้คุมงบอนุมัติ = จ่ายเงินทดรอง · ตัดงบเมื่อ Business / ธุรการเคลียร์เงินทดรองพร้อมใบเสร็จ', who: 'Business / ธุรการ (เคลียร์)' },
+    reimburse: { label: 'พนักงานสำรองจ่าย', short: 'สำรองจ่าย', cut: 'ตัดงบทันทีเมื่อผู้คุมงบตรวจผ่าน (ปิดยอดอัตโนมัติ)', who: 'ผู้คุมงบ (อัตโนมัติ)' },
+    direct: { label: 'จ่ายตรงให้ Supplier', short: 'จ่ายตรง', cut: 'ตัดงบทันทีเมื่อผู้คุมงบตรวจผ่าน (ปิดยอดอัตโนมัติ)', who: 'ผู้คุมงบ (อัตโนมัติ)', hint: 'ค่าแรง · จ้างเหมา · จ่ายรายวัน · ค่าน้ำมัน · Stock' }
   };
   /** โหมดทดลองเก็บไฟล์แนบในเบราว์เซอร์ จึงจำกัดขนาดไว้เล็ก (ระบบจริงเก็บใน Storage ได้ใหญ่กว่า) */
   const ATTACH_MAX = 400 * 1024;
@@ -1311,7 +1311,12 @@
   /** จัดซื้อต้องบันทึก PO */
   const needsPO = (r) => r.status === 'approved' && r.useType === 'prpo' && !hasPO(r);
   /** ผู้คุมงบต้องบันทึกการตัดงบหรือปิดยอด */
-  const needsCut = (r) => r.status === 'approved' && !needsPO(r);
+  /** รอ Business / ธุรการ เคลียร์เงินทดรอง (กฎตัดงบใหม่ cutRule 2: ผู้คุมงบอนุมัติ = จ่ายเงินทดรองแล้ว) */
+  const needsClear = (r) => r.status === 'approved' && r.cutRule === 2 && r.useType === 'advance';
+  /** ผู้คุมงบต้องบันทึกการตัดงบหรือปิดยอด (ใบกฎเก่า + PR/PO ที่จัดซื้อออก PO แล้วรอผู้คุมงบยืนยันยอด) */
+  const needsCut = (r) => r.status === 'approved' && !needsPO(r) && !needsClear(r);
+  /** ผู้ขอ (Business) หรือธุรการในบริษัทที่มีสิทธิ์ */
+  const isRequesterOrProxy = (r) => r.requesterId === me().id || (isProxy() && reqScoped(r));
   /** ข้อความสถานะของเอกสาร */
   function statusText(r) {
     if (r.status === 'approved') return 'ออกใบเบิกใช้งบแล้ว';
@@ -4622,6 +4627,19 @@
     r.status = 'approved';
     r.approvedAt = at;
     r.docNo = nextDocNo(r, b, at);
+    // กฎตัดงบ (cutRule 2): PR/PO = จัดซื้อบันทึก PO · เงินทดรอง = ผู้คุมงบอนุมัติ = จ่ายเงินทดรอง แล้ว Business/ธุรการเคลียร์ตามใบเสร็จ ·
+    // สำรองจ่าย / จ่ายตรง Supplier = ตัดงบและปิดยอดทันทีด้วยยอดที่อนุมัติ (ไม่ต้องให้ผู้ใดบันทึกอีก)
+    r.cutRule = 2;
+    const nowIso = new Date().toISOString();
+    if (r.useType === 'advance') {
+      r.advance = { date: nowIso.slice(0, 10), amount: r.amount, by: me().id, at: nowIso, auto: true };
+      addEvent(r, 'จ่ายเงินทดรอง (ผู้คุมงบอนุมัติ)', money(r.amount) + ' บาท — รอ Business / ธุรการเคลียร์ตามใบเสร็จ');
+    } else if (r.useType === 'reimburse' || r.useType === 'direct') {
+      const kind = CUT_FOR_TYPE[r.useType];
+      r.cuts = (r.cuts || []).concat({ id: nextId('x'), kind, date: nowIso.slice(0, 10), amount: r.amount, note: 'ตัดงบอัตโนมัติเมื่อผู้คุมงบตรวจผ่าน', by: me().id, at: nowIso, attachments: [], asset: 0, expense: 0, ref: '', auto: true });
+      addEvent(r, 'ตัดงบอัตโนมัติ (' + CUT_KIND[kind] + ')', money(r.amount) + ' บาท');
+      closeRequest(r, 'ตัดงบและปิดยอดอัตโนมัติเมื่อผู้คุมงบตรวจผ่าน');
+    }
     if (r.type === 'CBS') {
       // GL ตั้งต้นจากรายการต้นทุน (งบรวมทั้งโครงการ: จากหมวดค่าใช้จ่าย)
       r.lines.forEach((l) => {
@@ -4739,7 +4757,9 @@
     const kind = CUT_FOR_TYPE[t];
     const closed = r.status === 'closed';
     const cut = cutTotal(r);
-    const canCut = !closed && can(cutPerm(r)) && (t !== 'advance' || r.advance);
+    // กฎใหม่: เงินทดรองเคลียร์โดย Business / ธุรการ (ผู้ขอ) · กฎเก่า / PR-PO ใช้สิทธิ์เดิม
+    const clearByBusiness = r.cutRule === 2 && t === 'advance';
+    const canCut = !closed && (clearByBusiness ? isRequesterOrProxy(r) && !!r.advance : can(cutPerm(r)) && (t !== 'advance' || r.advance));
     let html = '<h2>การตัดงบ · ' + esc(USE_TYPES[t].label) + '</h2><section class="card cut-card">' +
       '<p class="muted small-note" style="margin:0 0 var(--s-3)">' + esc(USE_TYPES[t].cut) + ' · ผู้บันทึก: ' + esc(USE_TYPES[t].who) + '</p>' +
       '<div class="cut-summary"><div><span>ขอไว้</span><strong>' + money(r.amount) + '</strong></div>' +
@@ -4749,7 +4769,8 @@
 
     if (t === 'advance') {
       if (r.advance) {
-        html += '<p class="cut-step done">✓ จ่ายเงินทดรองแล้ว ' + money(r.advance.amount) + ' บาท · ' + fmtDay(r.advance.date) + ' · ' + esc(userName(r.advance.by)) + '</p>';
+        html += '<p class="cut-step done">✓ จ่ายเงินทดรองแล้ว ' + money(r.advance.amount) + ' บาท · ' + fmtDay(r.advance.date) + ' · ' + esc(userName(r.advance.by)) + (r.advance.auto ? ' (ผู้คุมงบอนุมัติ = จ่ายเงินทดรอง)' : '') + '</p>' +
+          (clearByBusiness && !closed ? '<div class="alert ' + (isRequesterOrProxy(r) ? 'warn' : 'info') + '">รอ ' + esc(userName(r.requesterId)) + ' (หรือธุรการ) เคลียร์เงินทดรองตามใบเสร็จ — งบจะถูกตัดตามยอดที่เคลียร์</div>' : '');
       } else if (!closed && can('cut.record')) {
         html += '<form id="advForm" class="cut-form" data-id="' + r.id + '"><h3>ขั้นที่ 1: จ่ายเงินทดรอง</h3><div class="row">' +
           '<label class="field"><span>วันที่จ่าย</span><input name="date" type="date" required value="' + today() + '"></label>' +
@@ -4783,7 +4804,7 @@
         '<label class="field"><span>' + (isPo ? 'วันที่ PO' : 'วันที่จ่าย') + '</span><input name="date" type="date" required value="' + today() + '"></label>' +
         '<label class="field"><span>' + (isPo ? 'ยอด PO (รวม VAT)' : kind === 'clear' ? 'ยอดใช้จริงตามใบเสร็จ' : 'ยอดจ่าย (รวม VAT)') + '</span>' +
         '<input name="amount" type="number" min="0.01" step="0.01" class="right" required value="' + (left || '') + '"></label></div>' +
-        (isPo || r.type !== 'CAPEX' ? '' : '<div class="row"><label class="field"><span>Asset (บัญชี — ไม่บังคับ)</span><input name="asset" type="number" min="0" step="0.01" class="right"></label>' +
+        (isPo || r.type !== 'CAPEX' || clearByBusiness ? '' : '<div class="row"><label class="field"><span>Asset (บัญชี — ไม่บังคับ)</span><input name="asset" type="number" min="0" step="0.01" class="right"></label>' +
           '<label class="field"><span>Expenses (บัญชี — ไม่บังคับ)</span><input name="expense" type="number" min="0" step="0.01" class="right"></label></div>') +
         '<label class="field"><span>หมายเหตุ (จำเป็นถ้ายอดรวมเกินที่ขอ)</span><input name="note"></label>' +
         '<div class="field"><span>แนบไฟล์ ' + (isPo ? 'PO' : 'ใบเสร็จ / หลักฐานการจ่าย') + '</span><input type="file" name="files" accept="application/pdf,image/png,image/jpeg" multiple></div>' +
@@ -5662,7 +5683,8 @@
         task('งบรอผู้คุมงบยืนยัน', mineB.filter((b) => b.state === 'review' || b.state === 'open_review').length, '#/tasks?tab=waiting'));
     }
     if (can('request.create')) {
-      tasks.push(task('คำขอของฉันที่รอผู้คุมงบตรวจสอบ', mineReq.filter((r) => r.status === 'pending').length, '#/tasks?tab=waiting'),
+      tasks.push(task('รอเคลียร์เงินทดรอง', mineReq.filter(needsClear).length, '#/tasks?tab=clear', 'ผู้คุมงบอนุมัติแล้ว — เคลียร์ตามใบเสร็จเพื่อตัดงบ'),
+        task('คำขอของฉันที่รอผู้คุมงบตรวจสอบ', mineReq.filter((r) => r.status === 'pending').length, '#/tasks?tab=waiting'),
         task('ส่งกลับแก้ไข', mineReq.filter((r) => r.status === 'rejected').length + db.budgets.filter((b) => actsFor(b) && (b.state === 'returned' || b.state === 'open_returned')).length, '#/tasks?tab=fix'),
         task('ออกใบเบิกใช้งบแล้ว รอปิดยอด', mineReq.filter((r) => r.status === 'approved').length, '#/tasks?tab=open'));
     }
@@ -6448,8 +6470,10 @@
         sec('งบ', mineB.filter((b) => b.state === 'review' || b.state === 'open_review'), myBudgetTable),
         sec('คำขอเบิกใช้งบ', mineR.filter((r) => r.status === 'pending'), (l) => requestTable(l, true)),
         sec('คำขอเพิ่มงบ', mineC.filter((c) => c.state === 'review'), changeQueueTable)]);
-      add('open', 'รอปิดยอด', false, 'ออกใบเบิกใช้งบแล้ว รอออก PO / จ่ายเงิน / เคลียร์ และปิดยอด',
-        [sec('', mineR.filter((r) => r.status === 'approved'), (l) => requestTable(l, true))]);
+      add('clear', 'รอเคลียร์เงินทดรอง', true, 'ผู้คุมงบอนุมัติ = จ่ายเงินทดรองแล้ว — Business / ธุรการเคลียร์ตามใบเสร็จ งบจะถูกตัดตามยอดที่เคลียร์',
+        [sec('', mineR.filter(needsClear), (l) => cutQueueTable(l, false))]);
+      add('open', 'รอปิดยอด', false, 'ออกใบเบิกใช้งบแล้ว รอออก PO / เคลียร์เงินทดรอง และปิดยอด',
+        [sec('', mineR.filter((r) => r.status === 'approved' && !needsClear(r)), (l) => requestTable(l, true))]);
     }
     return tabs;
   }
