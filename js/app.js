@@ -699,17 +699,22 @@
   // ---- ฟังก์ชันสำหรับหน้า Admin (ต้องมีสิทธิ์ user.manage) ----------------------------------
   const requireUserManage = () => { if (!can('user.manage')) throw new Error('ไม่มีสิทธิ์จัดการผู้ใช้'); };
   const nextUserId = () => { let n = USERS.length + 1; while (USERS.some((u) => u.id === 'u' + n)) n += 1; return 'u' + n; };
-  const accountClean = (f) => ({
+  /** บทบาททั้งหมดของผู้ใช้ (1 คนมีได้หลายบทบาท — สิทธิ์รวมกัน · บทบาทแรก = บทบาทหลัก) */
+  const rolesOf = (u) => (!u ? [] : Array.isArray(u.roles) && u.roles.length ? u.roles : (u.role ? [u.role] : []));
+  const accountClean = (f) => {
+    const roles = uniq((Array.isArray(f.roles) && f.roles.length ? f.roles : [f.role]).map((k) => String(k || '').trim()).filter(Boolean));
+    return {
     email: normEmail(f.email), name: String(f.name || '').trim(), title: String(f.title || '').trim(),
-    department: String(f.department || '').trim(), company: String(f.company || '').trim(), role: String(f.role || '').trim(),
+    department: String(f.department || '').trim(), company: String(f.company || '').trim(), role: roles[0] || '', roles,
     // บริษัทที่ดูงบ/งานได้ (ผู้คุมงบ / จัดซื้อ) — ไม่ส่งมา = คงค่าเดิม
     companies: Array.isArray(f.companies) ? uniq(f.companies.map((c) => String(c).trim()).filter(Boolean)) : undefined
-  });
+    };
+  };
   function accountProblem(a, ignoreId) {
     if (!validEmail(a.email)) return 'รูปแบบอีเมลไม่ถูกต้อง';
     if (USERS.some((u) => u.id !== ignoreId && normEmail(u.email) === a.email)) return 'อีเมลนี้มีอยู่ในระบบแล้ว';
     if (!a.name) return 'กรุณาระบุชื่อ';
-    if (!a.role) return 'กรุณาเลือกบทบาท';
+    if (!a.roles.length) return 'กรุณาเลือกบทบาทอย่างน้อย 1 บทบาท';
     return '';
   }
   /** เพิ่มบัญชี: Admin ใส่อีเมล + ข้อมูลบัญชี — ผู้ใช้ตั้งรหัสผ่านเอง (สถานะเริ่มต้น "รอตั้งรหัสผ่าน") */
@@ -839,8 +844,8 @@
     const a = accountClean(f);
     const problem = accountProblem(a, '');
     if (problem) throw new Error(problem);
-    const r = await window.RemoteApi.adminUsers({ action: 'create', email: a.email, name: a.name, title: a.title, department: a.department, company: a.company, companies: a.companies, role: a.role });
-    logAction('เพิ่มบัญชีผู้ใช้', a.email, a.name + ' · ' + (ROLE_LABEL[a.role] || a.role));
+    const r = await window.RemoteApi.adminUsers({ action: 'create', email: a.email, name: a.name, title: a.title, department: a.department, company: a.company, companies: a.companies, roles: a.roles });
+    logAction('เพิ่มบัญชีผู้ใช้', a.email, a.name + ' · ' + a.roles.map((k) => ROLE_LABEL[k] || k).join(', '));
     save();
     await refreshAccounts();
     return profileToUser(r.user);
@@ -850,8 +855,8 @@
     if (!u) throw new Error('ไม่พบบัญชี');
     const a = accountClean(Object.assign({}, u, f, { email: u.email })); // อีเมลเปลี่ยนไม่ได้ (ผูกกับบัญชีล็อกอิน)
     if (!a.name) throw new Error('กรุณาระบุชื่อ');
-    if (!a.role) throw new Error('กรุณาเลือกบทบาท');
-    await window.RemoteApi.v2UpdateUser({ id, name: a.name, title: a.title, department: a.department, company: a.company, companies: a.companies || [], role: a.role });
+    if (!a.roles.length) throw new Error('กรุณาเลือกบทบาทอย่างน้อย 1 บทบาท');
+    await window.RemoteApi.v2UpdateUser({ id, name: a.name, title: a.title, department: a.department, company: a.company, companies: a.companies || [], roles: a.roles });
     logAction('แก้ไขบัญชีผู้ใช้', u.email, a.name);
     save();
     await refreshAccounts();
@@ -934,7 +939,7 @@
     requireUserManage();
     if (AUTH_REMOTE) return remoteRolesRemove(key);
     if (BUILTIN_ROLES.includes(key) || !DEMO_ROLE_PERMS[key]) throw new Error('ลบได้เฉพาะบทบาทที่สร้างเพิ่ม');
-    if (USERS.some((u) => u.role === key)) throw new Error('ยังมีผู้ใช้ใช้บทบาทนี้อยู่ ย้ายผู้ใช้ไปบทบาทอื่นก่อน');
+    if (USERS.some((u) => rolesOf(u).includes(key))) throw new Error('ยังมีผู้ใช้ใช้บทบาทนี้อยู่ ย้ายผู้ใช้ไปบทบาทอื่นก่อน');
     const n = ROLE_LABEL[key];
     delete DEMO_ROLE_PERMS[key];
     delete ROLE_LABEL[key];
@@ -1112,7 +1117,7 @@
   const ownerText = (b) => (b.ownerId ? userName(b.ownerId) : (b.ownerName || ''));
   const ownerLabel = (b) => (b.ownerId ? userName(b.ownerId) : (b.ownerName ? b.ownerName + ' (ยังไม่ผูกกับผู้ใช้)' : '-'));
   const me = () => (REMOTE ? remoteMe : (user(currentUserId) || USERS[0]));
-  const permsOf = (u) => (u && (u.perms || DEMO_ROLE_PERMS[u.role])) || [];
+  const permsOf = (u) => (u && (u.perms || uniq(rolesOf(u).flatMap((k) => DEMO_ROLE_PERMS[k] || [])))) || [];
   const can = (perm) => permsOf(me()).includes(perm);
   /** เห็นงบและคำขอของทุกคน (สิทธิ์ดูทั้งหมด หรือสิทธิ์ที่ต้องทำงานกับเอกสารของคนอื่น) */
   /**
@@ -1120,7 +1125,7 @@
    * — เห็นทุกงานของบริษัทนั้นแม้ไม่ใช่ผู้รับผิดชอบ · บัญชีที่ไม่มี companies (เช่นโหมด Supabase ที่ฐานข้อมูลคุมสิทธิ์) และ Admin เห็นทุกบริษัท
    * · คืน null = ไม่จำกัด
    */
-  const companyScope = () => { const u = me(); return Array.isArray(u.companies) && u.role !== 'admin' && roleSeesWork(u.role) ? u.companies : null; };
+  const companyScope = () => { const u = me(); return Array.isArray(u.companies) && !rolesOf(u).includes('admin') && roleSeesWork(rolesOf(u)) ? u.companies : null; };
   const scopeOk = (company) => { const sc = companyScope(); return !sc || sc.includes(company); };
   const budgetScoped = (b) => !!b && scopeOk(b.company);
   const reqScoped = (r) => !!r && budgetScoped(budgetById(r.budgetId));
@@ -1130,7 +1135,7 @@
   const isProxy = () => can('business.proxy');
   /** ทำงานในนามเจ้าของงบ: เจ้าของงบเอง หรือธุรการในขอบเขตบริษัท */
   const actsFor = (b) => !!b && (b.ownerId === me().id || (isProxy() && budgetScoped(b)));
-  const roleLabel = (u) => (u && (u.roleName || ROLE_LABEL[u.role] || u.role)) || '';
+  const roleLabel = (u) => (u && (u.roleName || rolesOf(u).map((k) => ROLE_LABEL[k] || k).join(', '))) || '';
   /** เลือกเป็น Business เจ้าของงบได้: ต้องขอเบิกได้ และไม่ใช่ธุรการ (ธุรการเปิดใช้งบไม่ได้) */
   const canRequestUser = (x) => (x.canRequest !== undefined ? x.canRequest : permsOf(x).includes('request.create')) && !permsOf(x).includes('business.proxy');
   const budgetById = (id) => db.budgets.find((b) => b.id === id);
@@ -5885,7 +5890,7 @@
   // ---------------------------------------------------------------- Admin: ผู้ใช้ บทบาท สิทธิ์ (โหมด Supabase)
 
   /** บทบาทที่เห็นงบ/งานของคนอื่น (ต้องกำหนดบริษัทที่ดูได้) */
-  const roleSeesWork = (role) => ['budget.view_all', 'budget.manage', 'budget.verify', 'request.decide', 'cut.record', 'po.record', 'business.proxy', 'gl.manage'].some((k) => (DEMO_ROLE_PERMS[role] || []).includes(k));
+  const roleSeesWork = (roles) => ['budget.view_all', 'budget.manage', 'budget.verify', 'request.decide', 'cut.record', 'po.record', 'business.proxy', 'gl.manage'].some((k) => [].concat(roles).some((rk) => (DEMO_ROLE_PERMS[rk] || []).includes(k)));
   const adminResetCount = () => (!REMOTE && can('user.manage') ? USERS.filter((u) => accountState(u).key === 'reset_requested').length : 0);
 
   function viewAdmin(params) {
@@ -6567,9 +6572,10 @@
       fld('อีเมล', '<input name="email" type="email" required autocomplete="off" placeholder="name@company.com">') +
       fld('ชื่อ-นามสกุล', '<input name="name" required>') +
       fld('ตำแหน่ง', '<input name="title">') +
-      fld('บทบาท', '<div class="select-wrap"><select name="role" required>' + roleKeys().map((k) => opt(k, ROLE_LABEL[k] || k, 'business')).join('') + '</select></div>') +
       fld('หน่วยงาน', '<div class="select-wrap"><select name="department"><option value="">— เลือกหน่วยงาน —</option>' + db.master.departments.map((d) => opt(d.name, d.name, '')).join('') + '</select></div>') +
       fld('บริษัท', '<div class="select-wrap"><select name="company"><option value="">— เลือกบริษัท —</option>' + db.master.companies.map((c) => opt(c.code, c.code + (c.name ? ' — ' + c.name : ''), '')).join('') + '</select></div>') +
+      '<div class="field full req" id="roleField"><span>บทบาท (เลือกได้หลายบทบาท — สิทธิ์รวมกัน · แสดงบทบาทหลักเป็นบทบาทแรกตามลำดับในรายการ)</span><div class="actions" id="roleChecks">' +
+      roleKeys().map((k) => '<label class="chip"><input type="checkbox" name="roles" value="' + esc(k) + '"> ' + esc(ROLE_LABEL[k] || k) + '</label>').join('') + '</div></div>' +
       '<div class="field full" id="coField"><span>บริษัทที่ดูงบ / งานได้ (ผู้คุมงบ · จัดซื้อ — เลือกได้หลายบริษัท)</span><div class="actions" id="coChecks">' +
       db.master.companies.map((c) => '<label class="chip"><input type="checkbox" name="companies" value="' + esc(c.code) + '"> ' + esc(c.code) + '</label>').join('') + '</div></div>' +
       '</div><div class="muted section-hint" id="userFormHint">ผู้ดูแลระบบไม่ตั้งรหัสผ่านให้ — ผู้ใช้เข้าหน้าล็อกอิน → "' + (AUTH_REMOTE ? 'เปิดใช้ครั้งแรก' : 'ตั้งรหัสผ่าน') + '" แล้วกรอกอีเมลนี้เพื่อตั้งรหัสผ่านเอง</div>' +
@@ -6577,9 +6583,9 @@
     const rows = USERS.map((u) => {
       const st = accountState(u);
       const self = u.id === me().id;
-      return '<tr data-uid="' + esc(u.id) + '" data-search="' + esc([u.email, u.name, u.title, u.department, u.company].join(' ').toLowerCase()) + '" data-role="' + esc(u.role) + '" data-state="' + st.key + '">' +
+      return '<tr data-uid="' + esc(u.id) + '" data-search="' + esc([u.email, u.name, u.title, u.department, u.company].join(' ').toLowerCase()) + '" data-role="' + esc(rolesOf(u).join(' ')) + '" data-state="' + st.key + '">' +
         '<td>' + esc(u.name) + (self ? ' <span class="muted">(คุณ)</span>' : '') + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.title || '–') + '</td><td>' + esc(u.department || '–') + '</td><td>' + esc(u.company || '–') + '</td>' +
-        '<td>' + (u.role === 'admin' ? '<span class="muted">ทุกบริษัท</span>' : Array.isArray(u.companies) ? (u.companies.length ? esc(u.companies.join(', ')) : (roleSeesWork(u.role) ? '<span class="badge cancelled">ยังไม่กำหนด</span>' : '–')) : '–') + '</td>' +
+        '<td>' + (rolesOf(u).includes('admin') ? '<span class="muted">ทุกบริษัท</span>' : Array.isArray(u.companies) ? (u.companies.length ? esc(u.companies.join(', ')) : (roleSeesWork(rolesOf(u)) ? '<span class="badge cancelled">ยังไม่กำหนด</span>' : '–')) : '–') + '</td>' +
         '<td>' + esc(roleLabel(u)) + '</td><td><span class="badge ' + ACCOUNT_BADGE[st.key] + '">' + esc(st.label) + '</span></td>' +
         '<td class="nowrap">' + (u.lastLoginAt ? fmtDate(u.lastLoginAt) : '–') + '</td>' +
         '<td class="nowrap"><button type="button" class="btn small" data-user-edit>แก้ไข</button> ' +
@@ -6660,7 +6666,7 @@
     const filter = () => {
       let n = 0;
       table.querySelectorAll('tbody tr[data-uid]').forEach((tr) => {
-        const ok = (!q.value.trim() || tr.dataset.search.includes(q.value.trim().toLowerCase())) && (!fr.value || tr.dataset.role === fr.value) && (!fs.value || tr.dataset.state === fs.value);
+        const ok = (!q.value.trim() || tr.dataset.search.includes(q.value.trim().toLowerCase())) && (!fr.value || (' ' + tr.dataset.role + ' ').includes(' ' + fr.value + ' ')) && (!fs.value || tr.dataset.state === fs.value);
         tr.hidden = !ok;
         if (ok) n += 1;
       });
@@ -6681,12 +6687,14 @@
       document.getElementById('userFormError').innerHTML = '';
       document.getElementById('userFormTitle').textContent = u ? 'แก้ไขผู้ใช้' : 'เพิ่มผู้ใช้';
       document.getElementById('userFormHint').hidden = !!u;
-      ['email', 'name', 'title', 'role', 'department', 'company'].forEach((k) => {
+      ['email', 'name', 'title', 'department', 'company'].forEach((k) => {
         const el = form.elements[k];
-        const v = u ? u[k] || '' : (k === 'role' ? 'business' : '');
+        const v = u ? u[k] || '' : '';
         if (el.tagName === 'SELECT' && v && !Array.from(el.options).some((o) => o.value === v)) el.appendChild(new Option(v, v)); // ค่าเดิมที่ไม่อยู่ในข้อมูลหลักแล้ว ไม่ให้หาย
         el.value = v;
       });
+      const rs = u ? rolesOf(u) : ['business'];
+      form.querySelectorAll('[name=roles]').forEach((c) => { c.checked = rs.includes(c.value); });
       const cos = u ? (Array.isArray(u.companies) ? u.companies : []) : [];
       form.querySelectorAll('[name=companies]').forEach((c) => { c.checked = cos.includes(c.value); });
       card.hidden = false;
@@ -6704,10 +6712,12 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const f = form.elements;
-      const data = { email: f.email.value, name: f.name.value, title: f.title.value, department: f.department.value, company: f.company.value, role: f.role.value,
+      const data = { email: f.email.value, name: f.name.value, title: f.title.value, department: f.department.value, company: f.company.value,
+        roles: Array.from(form.querySelectorAll('[name=roles]:checked')).map((c) => c.value),
         companies: Array.from(form.querySelectorAll('[name=companies]:checked')).map((c) => c.value) };
-      const sees = roleSeesWork(data.role);
-      if (sees && data.role !== 'admin' && !data.companies.length) { errModal('เลือกบริษัทที่ดูงบ / งานได้อย่างน้อย 1 บริษัท — บทบาทนี้เห็นงานของบริษัทตามที่กำหนด'); return; }
+      if (!data.roles.length) { errModal('เลือกบทบาทอย่างน้อย 1 บทบาท'); return; }
+      const sees = roleSeesWork(data.roles);
+      if (sees && !data.roles.includes('admin') && !data.companies.length) { errModal('เลือกบริษัทที่ดูงบ / งานได้อย่างน้อย 1 บริษัท — บทบาทนี้เห็นงานของบริษัทตามที่กำหนด'); return; }
       const submitBtn = form.querySelector('button[type=submit]');
       submitBtn.disabled = true;
       try {

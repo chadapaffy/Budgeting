@@ -238,4 +238,32 @@ select pg_temp.expect_fail($$select public.v2_master_get()$$, 'บัญชี�
 select pg_temp.expect_fail($$select public.v2_master_add_supplier('Z')$$, 'บัญชีที่ปิดแล้วเพิ่ม Supplier ไม่ได้');
 reset role;
 update public.v2_profiles set active = true where id = '00000000-0000-0000-0000-000000000003';
+
+-- ---------------------------------------------------------------- 1 ผู้ใช้หลายบทบาท
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000001', false);
+select public.v2_save_role('auditor', 'ผู้ตรวจสอบ', '', array['budget.view_all', 'log.view']);
+select pg_temp.ok((public.v2_update_user('00000000-0000-0000-0000-000000000003', 'Biz', '', '', '', '{PBI}', array['business', 'auditor'])->'roles') = '["business", "auditor"]'::jsonb, 'ตั้งหลายบทบาทได้ (คงลำดับ)');
+select pg_temp.ok((public.v2_update_user('00000000-0000-0000-0000-000000000003', 'Biz', '', '', '', '{PBI}', array['business', 'auditor', 'business'])->'roles') = '["business", "auditor"]'::jsonb, 'บทบาทซ้ำถูกตัดออก');
+select pg_temp.ok((select role from public.v2_profiles where id = '00000000-0000-0000-0000-000000000003') = 'business', 'role = บทบาทหลัก (roles[1])');
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', false);
+select pg_temp.ok((public.v2_me() -> 'permissions') @> '["budget.create", "request.create", "budget.view_all", "log.view"]'::jsonb, 'สิทธิ์ = รวมของทุกบทบาท');
+select pg_temp.ok(not ((public.v2_me() -> 'permissions') @> '["user.manage"]'::jsonb), 'ไม่ได้สิทธิ์ของบทบาทที่ไม่มี');
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000001', false);
+select pg_temp.expect_fail($$select public.v2_update_user('00000000-0000-0000-0000-000000000003', 'Biz', '', '', '', '{}', '{}'::text[])$$, 'ต้องมีอย่างน้อย 1 บทบาท');
+select pg_temp.expect_fail($$select public.v2_update_user('00000000-0000-0000-0000-000000000003', 'Biz', '', '', '', '{}', array['business', 'nope'])$$, 'บทบาทที่ไม่มีอยู่ถูกปฏิเสธ');
+select pg_temp.expect_fail($$select public.v2_delete_role('auditor')$$, 'ลบบทบาทที่ผู้ใช้มีเป็นบทบาทเสริมไม่ได้');
+select pg_temp.ok((public.v2_update_user('00000000-0000-0000-0000-000000000003', 'Biz', '', '', '', '{PBI}', 'business')->'roles') = '["business"]'::jsonb, 'เรียกแบบเดิม (บทบาทเดียว) ยังใช้ได้');
+select public.v2_delete_role('auditor');
+-- Admin คนสุดท้าย: admin เป็นบทบาทเสริมก็นับ
+select public.v2_save_role('mgr', 'ผู้จัดการ', '', array['user.manage']);
+select public.v2_update_user('00000000-0000-0000-0000-000000000002', 'Ctrl', '', '', '', '{PBI}', array['controller', 'mgr']);
+select pg_temp.ok(public._v2_managers(null) = 2, 'ผู้จัดการผู้ใช้ผ่านบทบาทเสริมถูกนับ');
+select pg_temp.expect_fail($$select public.v2_save_role('admin', 'Admin', '', array['budget.view_all'])$$, 'admin ต้องมี user.manage (หลายบทบาท)');
+select public.v2_update_user('00000000-0000-0000-0000-000000000002', 'Ctrl', '', '', '', '{PBI}', array['controller']);
+select public.v2_delete_role('mgr');
+select pg_temp.ok((select roles from public.v2_profiles where id = '00000000-0000-0000-0000-000000000001') = array['admin'], 'ข้อมูลเดิมถูกย้ายเป็น roles');
+reset role;
+update public.v2_profiles set role = 'controller' where id = '00000000-0000-0000-0000-000000000003';
+select pg_temp.ok((select roles from public.v2_profiles where id = '00000000-0000-0000-0000-000000000003') = array['controller'], 'แก้คอลัมน์ role ตรงๆ ซิงก์เข้า roles');
+update public.v2_profiles set role = 'business' where id = '00000000-0000-0000-0000-000000000003';
 \echo ALL V2 TESTS PASSED
