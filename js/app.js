@@ -98,7 +98,7 @@
       const r = saved[k];
       if (!r || !Array.isArray(r.perms)) return;
       DEMO_ROLE_PERMS[k] = r.perms.filter((x) => PERMISSIONS.some((p) => p.key === x));
-      if (!BUILTIN_ROLES.includes(k) && r.name) ROLE_LABEL[k] = String(r.name);
+      if (r.name) ROLE_LABEL[k] = String(r.name);
     });
     if (!DEMO_ROLE_PERMS.admin.includes('user.manage')) DEMO_ROLE_PERMS.admin.push('user.manage');
   }
@@ -890,14 +890,24 @@
 
   // ---- บทบาทและสิทธิ์ (โหมดทดลอง ต้องมีสิทธิ์ user.manage) ----------------------------------------
   /** บันทึกสิทธิ์ของบทบาท: map = { roleKey: [permKey, ...] } (บทบาท admin ต้องมี user.manage เสมอ) */
-  function rolesSavePerms(map) {
+  function rolesSavePerms(map, names) {
     requireUserManage();
-    if (AUTH_REMOTE) return remoteRolesSave(map);
+    names = names || {};
+    const nm = {};
+    Object.keys(map).forEach((k) => { if (DEMO_ROLE_PERMS[k]) nm[k] = String(names[k] != null ? names[k] : ROLE_LABEL[k] || k).trim(); });
+    const seen = {};
+    Object.keys(nm).forEach((k) => {
+      if (!nm[k]) throw new Error('กรุณาระบุชื่อบทบาท');
+      if (seen[nm[k]]) throw new Error('มีบทบาทชื่อ "' + nm[k] + '" ซ้ำกัน');
+      seen[nm[k]] = true;
+    });
+    if (AUTH_REMOTE) return remoteRolesSave(map, nm);
     Object.keys(map).forEach((k) => {
       if (!DEMO_ROLE_PERMS[k]) return;
       const perms = PERMISSIONS.map((p) => p.key).filter((x) => map[k].includes(x));
       if (k === 'admin' && !perms.includes('user.manage')) perms.push('user.manage');
       DEMO_ROLE_PERMS[k] = perms;
+      ROLE_LABEL[k] = nm[k];
     });
     saveRoles();
     logAction('แก้สิทธิ์ของบทบาท', '', Object.keys(map).map((k) => ROLE_LABEL[k] || k).join(', '));
@@ -940,12 +950,12 @@
     save();
   }
   const isSystemRole = (k) => (AUTH_REMOTE ? !!remoteRoleSys[k] : BUILTIN_ROLES.includes(k));
-  async function remoteRolesSave(map) {
+  async function remoteRolesSave(map, nm) {
     for (const k of Object.keys(map)) {
       if (!DEMO_ROLE_PERMS[k]) continue;
       const perms = PERMISSIONS.map((p) => p.key).filter((x) => map[k].includes(x));
-      if (perms.join() === DEMO_ROLE_PERMS[k].join()) continue;
-      await window.RemoteApi.v2SaveRole({ key: k, name: ROLE_LABEL[k] || k, permissions: perms });
+      if (perms.join() === DEMO_ROLE_PERMS[k].join() && nm[k] === (ROLE_LABEL[k] || k)) continue;
+      await window.RemoteApi.v2SaveRole({ key: k, name: nm[k], permissions: perms });
     }
     logAction('แก้สิทธิ์ของบทบาท', '', Object.keys(map).map((k) => ROLE_LABEL[k] || k).join(', '));
     save();
@@ -6562,7 +6572,7 @@
   function viewAdminRoles() {
     const keys = roleKeys();
     let group = '';
-    const head = keys.map((k) => '<th class="center perm-col"><span class="role-name">' + esc(ROLE_LABEL[k] || k) + '</span>' +
+    const head = keys.map((k) => '<th class="center perm-col"><input data-role-name="' + esc(k) + '" value="' + esc(ROLE_LABEL[k] || k) + '" maxlength="60" required aria-label="ชื่อบทบาท ' + esc(k) + '">' +
       (isSystemRole(k) ? '' : '<div><button type="button" class="btn small bad" data-role-del="' + esc(k) + '">ลบบทบาท</button></div>') + '</th>').join('');
     const body = PERMISSIONS.map((pm) => {
       const g = pm.group !== group ? '<tr class="perm-group"><td colspan="' + (keys.length + 1) + '">' + esc(pm.group) + '</td></tr>' : '';
@@ -6572,7 +6582,7 @@
         return '<td class="center"><input type="checkbox" data-role="' + esc(k) + '" data-perm="' + pm.key + '"' + (DEMO_ROLE_PERMS[k].includes(pm.key) ? ' checked' : '') + (locked ? ' disabled title="Admin ต้องมีสิทธิ์นี้เสมอ"' : '') + ' aria-label="' + esc(ROLE_LABEL[k] + ' — ' + pm.label) + '"></td>';
       }).join('') + '</tr>';
     }).join('');
-    return '<section class="card form-section"><div class="section-head"><div><h2 class="section-title">สิทธิ์ของแต่ละบทบาท</h2><div class="muted section-hint">ติ๊กแล้วกด "บันทึกสิทธิ์" — มีผลกับผู้ใช้ทุกคนที่อยู่ในบทบาทนั้นทันที (ผู้ใช้ที่ล็อกอินอยู่ต้องรีเฟรชหน้า)</div></div></div>' +
+    return '<section class="card form-section"><div class="section-head"><div><h2 class="section-title">สิทธิ์ของแต่ละบทบาท</h2><div class="muted section-hint">แก้ชื่อบทบาทที่หัวคอลัมน์ ติ๊กสิทธิ์ แล้วกด "บันทึกสิทธิ์" — มีผลกับผู้ใช้ทุกคนที่อยู่ในบทบาทนั้นทันที (ผู้ใช้ที่ล็อกอินอยู่ต้องรีเฟรชหน้า)</div></div></div>' +
       '<form id="rolePermForm"><div class="table-wrap"><table class="perm-matrix"><thead><tr><th>สิทธิ์</th>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
       '<div class="actions"><button class="btn primary" type="submit">บันทึกสิทธิ์</button>' + (AUTH_REMOTE ? '' : '<button class="btn" type="button" data-roles-reset>คืนค่าเริ่มต้น</button>') + '</div></form></section>' +
       '<section class="card form-section"><div class="section-head"><h2 class="section-title">เพิ่มบทบาท</h2></div>' +
@@ -6591,7 +6601,9 @@
         e.preventDefault();
         const map = {};
         roleKeys().forEach((k) => { map[k] = Array.from(rp.querySelectorAll('[data-role="' + k + '"]:checked')).map((c) => c.dataset.perm); });
-        try { await rolesSavePerms(map); setFlash('success', 'บันทึกสิทธิ์ของบทบาทแล้ว'); } catch (ex) { err(ex.message); return; }
+        const names = {};
+        roleKeys().forEach((k) => { const i = rp.querySelector('[data-role-name="' + k + '"]'); if (i) names[k] = i.value; });
+        try { await rolesSavePerms(map, names); setFlash('success', 'บันทึกชื่อและสิทธิ์ของบทบาทแล้ว'); } catch (ex) { err(ex.message); return; }
         back();
       });
       const rr = rp.querySelector('[data-roles-reset]');
