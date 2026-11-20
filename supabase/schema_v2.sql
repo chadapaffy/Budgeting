@@ -41,6 +41,8 @@ update public.v2_profiles set password_set_at = last_login_at where password_set
 
 -- หลายบทบาทต่อผู้ใช้: roles = บทบาททั้งหมด (สิทธิ์ = รวมทุกบทบาท) · role = บทบาทหลัก (roles[1]) เก็บไว้ให้โค้ดเดิม/Edge Function เก่าใช้ต่อได้
 alter table public.v2_profiles add column if not exists roles text[] not null default '{}';
+-- ธุรการ (สิทธิ์ business.proxy): รายการ id ของ Business ที่ช่วยงานให้ — เห็น/ทำแทนได้เฉพาะงบของคนในรายการ (Admin ตั้งให้ · ธุรการแก้เองไม่ได้) · ว่าง = ไม่เห็นงบของใครเลย
+alter table public.v2_profiles add column if not exists proxy_for text[] not null default '{}';
 update public.v2_profiles set roles = array[role] where cardinality(roles) = 0 and role is not null;
 
 create or replace function public._v2_sync_roles() returns trigger
@@ -131,7 +133,7 @@ language sql immutable set search_path = public as $$
     'companies', to_jsonb(p.companies), 'role', p.roles[1], 'roles', to_jsonb(p.roles), 'active', p.active)
     || case when p_full then jsonb_build_object(
       'email', p.email, 'createdAt', p.created_at, 'lastLoginAt', p.last_login_at,
-      'resetRequestedAt', p.reset_requested_at, 'resetAt', p.reset_at, 'passwordSetAt', p.password_set_at) else '{}'::jsonb end
+      'resetRequestedAt', p.reset_requested_at, 'resetAt', p.reset_at, 'passwordSetAt', p.password_set_at, 'proxyFor', to_jsonb(p.proxy_for)) else '{}'::jsonb end
 $$;
 
 -- ---------------------------------------------------------------- ฟังก์ชันที่เบราว์เซอร์เรียก
@@ -152,11 +154,15 @@ end $$;
 /** รายชื่อผู้ใช้ที่เปิดใช้งาน (ไม่มีอีเมล) — ไว้เลือก/แท็กงานถึงคน ใช้ได้ทุกคนที่ล็อกอิน */
 create or replace function public.v2_directory() returns jsonb
 language plpgsql stable security definer set search_path = public as $$
+declare me_id uuid;
 begin
-  if (select id from public._v2_user()) is null then
+  me_id := (select id from public._v2_user());
+  if me_id is null then
     raise exception 'ไม่มีสิทธิ์ใช้งาน' using errcode = '42501';
   end if;
-  return coalesce((select jsonb_agg(public._v2_user_json(p, false) order by p.name) from public.v2_profiles p where p.active), '[]'::jsonb);
+  -- แถวของตัวเองมี proxyFor (ธุรการช่วยงานให้ใคร) · แถวคนอื่นไม่มี
+  return coalesce((select jsonb_agg(public._v2_user_json(p, false) || case when p.id = me_id then jsonb_build_object('proxyFor', to_jsonb(p.proxy_for)) else '{}'::jsonb end order by p.name)
+    from public.v2_profiles p where p.active), '[]'::jsonb);
 end $$;
 
 /** รายชื่อผู้ใช้ทั้งหมดสำหรับหน้า Admin */
@@ -168,10 +174,10 @@ begin
 end $$;
 
 /** แก้ข้อมูลบัญชี (ไม่รวมเปิด/ปิดใช้งานและอีเมล — ทำผ่าน Edge Function) · p_roles = บทบาททั้งหมดของผู้ใช้ (อย่างน้อย 1) */
-create or replace function public.v2_update_user(p_id uuid, p_name text, p_title text, p_department text, p_company text, p_companies text[], p_roles text[])
+create or replace function public.v2_update_user(p_id uuid, p_name text, p_title text, p_department text, p_company text, p_companies text[], p_roles text[], p_proxy_for text[])
 returns jsonb
 language plpgsql volatile security definer set search_path = public as $$
-declare target public.v2_profiles; new_roles text[];
+declare target public.v2_profiles; new_roles text[]; new_proxy text[];
 begin
   perform public._v2_need('user.manage');
   select * into target from public.v2_profiles where id = p_id;
@@ -188,12 +194,21 @@ begin
      and public._v2_managers(target.id) = 0 then
     raise exception 'ต้องมีผู้ดูแลระบบที่เปิดใช้งานอย่างน้อย 1 คน' using errcode = '42501';
   end if;
+  -- ธุรการช่วยงานให้ใคร: เก็บเฉพาะ id ที่มีบัญชีอยู่จริง (ไม่รวมตัวเอง) ไม่ซ้ำ
+  new_proxy := array(select distinct x from unnest(coalesce(p_proxy_for, '{}')) x where exists (select 1 from public.v2_profiles q where q.id::text = x and q.id <> p_id));
   update public.v2_profiles set
     name = btrim(p_name), title = btrim(coalesce(p_title, '')), department = btrim(coalesce(p_department, '')),
-    company = btrim(coalesce(p_company, '')), companies = coalesce(p_companies, '{}'), roles = new_roles
+    company = btrim(coalesce(p_company, '')), companies = coalesce(p_companies, '{}'), roles = new_roles, proxy_for = new_proxy
   where id = p_id returning * into target;
   return public._v2_user_json(target, true);
 end $$;
+
+/** เวอร์ชันบทบาทหลายบทบาท (ไม่ส่งรายชื่อ Business ที่ธุรการช่วย) — คง proxy_for เดิมไว้ */
+create or replace function public.v2_update_user(p_id uuid, p_name text, p_title text, p_department text, p_company text, p_companies text[], p_roles text[])
+returns jsonb
+language sql volatile security definer set search_path = public as $$
+  select public.v2_update_user(p_id, p_name, p_title, p_department, p_company, p_companies, p_roles, (select proxy_for from public.v2_profiles where id = p_id))
+$$;
 
 /** เวอร์ชันเดิม (บทบาทเดียว) — เก็บไว้ให้เว็บรุ่นเก่าที่ยังเปิดค้างอยู่ */
 create or replace function public.v2_update_user(p_id uuid, p_name text, p_title text, p_department text, p_company text, p_companies text[], p_role text)
@@ -394,11 +409,11 @@ revoke all on function public._v2_user(), public._v2_perms(text), public._v2_per
   public._v2_user_json(public.v2_profiles, boolean), public._v2_perm_catalog(), public._v2_master_keys(), public._v2_master_check(text, jsonb) from public, anon, authenticated;
 
 revoke all on function public.v2_me(boolean), public.v2_directory(), public.v2_list_users(),
-  public.v2_update_user(uuid, text, text, text, text, text[], text), public.v2_update_user(uuid, text, text, text, text, text[], text[]), public.v2_request_reset(text),
+  public.v2_update_user(uuid, text, text, text, text, text[], text), public.v2_update_user(uuid, text, text, text, text, text[], text[]), public.v2_update_user(uuid, text, text, text, text, text[], text[], text[]), public.v2_request_reset(text),
   public.v2_list_roles(), public.v2_save_role(text, text, text, text[]), public.v2_delete_role(text) from public, anon, authenticated;
 
 grant execute on function public.v2_me(boolean), public.v2_directory(), public.v2_list_users(),
-  public.v2_update_user(uuid, text, text, text, text, text[], text), public.v2_update_user(uuid, text, text, text, text, text[], text[]),
+  public.v2_update_user(uuid, text, text, text, text, text[], text), public.v2_update_user(uuid, text, text, text, text, text[], text[]), public.v2_update_user(uuid, text, text, text, text, text[], text[], text[]),
   public.v2_list_roles(), public.v2_save_role(text, text, text, text[]), public.v2_delete_role(text) to authenticated;
 grant execute on function public.v2_request_reset(text) to anon, authenticated;
 revoke all on function public.v2_activation_status(text) from public, anon, authenticated;
