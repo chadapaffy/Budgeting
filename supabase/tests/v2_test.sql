@@ -97,6 +97,25 @@ do $$ begin
   raise notice 'PASS: ลบบทบาทที่สร้างเพิ่ม';
 end $$;
 
+-- ธุรการแท็กตามชื่อ Business: Admin ตั้ง proxy_for (กรอง id ที่ไม่มี/ตัวเองออก) · เวอร์ชัน 7 พารามิเตอร์ไม่ล้างค่าเดิม · แถวตัวเองใน directory มี proxyFor แถวอื่นไม่มี
+do $$ declare u jsonb; d jsonb; begin
+  u := public.v2_update_user('00000000-0000-0000-0000-000000000003', 'Biz 2', '', '', 'PBI', '{PBI}', array['business'],
+    array['00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000099', '00000000-0000-0000-0000-000000000003']);
+  if u -> 'proxyFor' <> '["00000000-0000-0000-0000-000000000002"]'::jsonb then raise exception 'FAIL proxy_for ต้องกรอง id ที่ไม่มี/ตัวเอง %', u -> 'proxyFor'; end if;
+  u := public.v2_update_user('00000000-0000-0000-0000-000000000003', 'Biz 2', '', '', 'PBI', '{PBI}', array['business']);
+  if u -> 'proxyFor' <> '["00000000-0000-0000-0000-000000000002"]'::jsonb then raise exception 'FAIL เวอร์ชัน 7 พารามิเตอร์ต้องคง proxy_for เดิม %', u -> 'proxyFor'; end if;
+  raise notice 'PASS: Admin ตั้ง proxy_for (กรองค่าไม่ถูกต้อง) และการแก้โดยไม่ส่ง proxy_for ไม่ล้างค่า';
+end $$;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', false);
+do $$ declare d jsonb; me_row jsonb; other_row jsonb; begin
+  d := public.v2_directory();
+  select x into me_row from jsonb_array_elements(d) x where x ->> 'id' = '00000000-0000-0000-0000-000000000003';
+  select x into other_row from jsonb_array_elements(d) x where x ->> 'id' = '00000000-0000-0000-0000-000000000002';
+  if not (me_row ? 'proxyFor') or (other_row ? 'proxyFor') then raise exception 'FAIL directory: proxyFor เฉพาะแถวตัวเอง'; end if;
+  raise notice 'PASS: directory ให้ proxyFor เฉพาะแถวของตัวเอง';
+end $$;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000001', false);
+
 -- มี Admin ที่สอง → ลดสิทธิ์คนแรกได้
 reset role;
 insert into public.v2_profiles (id, email, name, role) values ('00000000-0000-0000-0000-000000000004', 'admin2@example.com', 'Admin2', 'admin');

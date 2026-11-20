@@ -707,7 +707,9 @@
     email: normEmail(f.email), name: String(f.name || '').trim(), title: String(f.title || '').trim(),
     department: String(f.department || '').trim(), company: String(f.company || '').trim(), role: roles[0] || '', roles,
     // บริษัทที่ดูงบ/งานได้ (ผู้คุมงบ / จัดซื้อ) — ไม่ส่งมา = คงค่าเดิม
-    companies: Array.isArray(f.companies) ? uniq(f.companies.map((c) => String(c).trim()).filter(Boolean)) : undefined
+    companies: Array.isArray(f.companies) ? uniq(f.companies.map((c) => String(c).trim()).filter(Boolean)) : undefined,
+    // ธุรการช่วยงานให้ Business คนไหน (รายการ id ผู้ใช้) — ไม่ส่งมา = คงค่าเดิม
+    proxyFor: Array.isArray(f.proxyFor) ? uniq(f.proxyFor.map((c) => String(c).trim()).filter(Boolean)) : undefined
     };
   };
   function accountProblem(a, ignoreId) {
@@ -725,6 +727,7 @@
     const problem = accountProblem(a, '');
     if (problem) throw new Error(problem);
     if (a.companies === undefined) a.companies = a.company ? [a.company] : [];
+    if (a.proxyFor === undefined) a.proxyFor = [];
     const u = Object.assign({ id: nextUserId(), active: true, mustSetPassword: true, pwHash: '', pwSalt: '', createdAt: new Date().toISOString(), createdBy: me().id }, a);
     USERS.push(u);
     saveUsers();
@@ -742,6 +745,7 @@
     const problem = accountProblem(a, id);
     if (problem) throw new Error(problem);
     if (a.companies === undefined) delete a.companies;
+    if (a.proxyFor === undefined) delete a.proxyFor;
     Object.assign(u, a);
     saveUsers();
     logAction('แก้ไขบัญชีผู้ใช้', u.email, u.name);
@@ -823,6 +827,7 @@
   const remoteRoleSys = {};  // roleKey → true ถ้าเป็นบทบาทตั้งต้นของระบบ (ลบไม่ได้)
   const profileToUser = (p) => Object.assign({}, p, {
     company: p.company || '', companies: Array.isArray(p.companies) ? p.companies : [],
+    proxyFor: Array.isArray(p.proxyFor) ? p.proxyFor : [],
     pwHash: 'x', passwordChangedAt: p.passwordSetAt || '',
     mustSetPassword: !p.passwordSetAt
   });
@@ -845,6 +850,9 @@
     const problem = accountProblem(a, '');
     if (problem) throw new Error(problem);
     const r = await window.RemoteApi.adminUsers({ action: 'create', email: a.email, name: a.name, title: a.title, department: a.department, company: a.company, companies: a.companies, roles: a.roles });
+    if (a.proxyFor && a.proxyFor.length) {
+      await window.RemoteApi.v2UpdateUser({ id: r.user.id, name: a.name, title: a.title, department: a.department, company: a.company, companies: a.companies || [], roles: a.roles, proxyFor: a.proxyFor });
+    }
     logAction('เพิ่มบัญชีผู้ใช้', a.email, a.name + ' · ' + a.roles.map((k) => ROLE_LABEL[k] || k).join(', '));
     save();
     await refreshAccounts();
@@ -856,7 +864,7 @@
     const a = accountClean(Object.assign({}, u, f, { email: u.email })); // อีเมลเปลี่ยนไม่ได้ (ผูกกับบัญชีล็อกอิน)
     if (!a.name) throw new Error('กรุณาระบุชื่อ');
     if (!a.roles.length) throw new Error('กรุณาเลือกบทบาทอย่างน้อย 1 บทบาท');
-    await window.RemoteApi.v2UpdateUser({ id, name: a.name, title: a.title, department: a.department, company: a.company, companies: a.companies || [], roles: a.roles });
+    await window.RemoteApi.v2UpdateUser({ id, name: a.name, title: a.title, department: a.department, company: a.company, companies: a.companies || [], roles: a.roles, proxyFor: Array.isArray(f.proxyFor) ? a.proxyFor : undefined }); // ส่งเฉพาะเมื่อฟอร์มมีช่องนี้ (ไม่งั้นคงค่าเดิมและใช้ฟังก์ชันเวอร์ชันเก่าของฐานข้อมูลได้)
     logAction('แก้ไขบัญชีผู้ใช้', u.email, a.name);
     save();
     await refreshAccounts();
@@ -1131,11 +1139,16 @@
   const budgetScoped = (b) => !!b && scopeOk(b.company);
   const reqScoped = (r) => !!r && budgetScoped(budgetById(r.budgetId));
   const chgScoped = (c) => !!c && budgetScoped(budgetById(c.budgetId));
-  const canViewAll = () => ['budget.view_all', 'budget.manage', 'budget.verify', 'request.decide', 'cut.record', 'po.record', 'business.proxy', 'gl.manage'].some(can);
+  const canViewAll = () => ['budget.view_all', 'budget.manage', 'budget.verify', 'request.decide', 'cut.record', 'po.record', 'gl.manage'].some(can);
   /** ธุรการ (business.proxy): ทำเอกสารแทน Business ได้ในบริษัทที่มีสิทธิ์ — เปิดใช้งบครั้งแรกทำไม่ได้ (ดู canOpenBudget) */
   const isProxy = () => can('business.proxy');
   /** ทำงานในนามเจ้าของงบ: เจ้าของงบเอง หรือธุรการในขอบเขตบริษัท */
-  const actsFor = (b) => !!b && (b.ownerId === me().id || (isProxy() && budgetScoped(b)));
+  /**
+   * ธุรการช่วยงานเฉพาะ Business ที่ Admin แท็กให้ (proxyFor = รายการ id ผู้ใช้) ในบริษัทที่บัญชีมีสิทธิ์ — ธุรการแก้เองไม่ได้ ·
+   * ไม่ได้แท็กใครเลย = ไม่เห็นงบของใคร (ฐานข้อมูลบังคับเหมือนกัน — v2_profiles.proxy_for)
+   */
+  const proxyOf = (b) => !!b && isProxy() && budgetScoped(b) && (me().proxyFor || []).includes(b.ownerId);
+  const actsFor = (b) => !!b && (b.ownerId === me().id || proxyOf(b));
   const roleLabel = (u) => (u && (u.roleName || rolesOf(u).map((k) => ROLE_LABEL[k] || k).join(', '))) || '';
   /** เลือกเป็น Business เจ้าของงบได้: ต้องขอเบิกได้ และไม่ใช่ธุรการ (ธุรการเปิดใช้งบไม่ได้) */
   const canRequestUser = (x) => (x.canRequest !== undefined ? x.canRequest : permsOf(x).includes('request.create')) && !permsOf(x).includes('business.proxy');
@@ -1324,7 +1337,7 @@
   /** ผู้คุมงบต้องบันทึกการตัดงบหรือปิดยอด (ใบกฎเก่า + PR/PO ที่จัดซื้อออก PO แล้วรอผู้คุมงบยืนยันยอด) */
   const needsCut = (r) => r.status === 'approved' && !needsPO(r) && !needsClear(r);
   /** ผู้ขอ (Business) หรือธุรการในบริษัทที่มีสิทธิ์ */
-  const isRequesterOrProxy = (r) => r.requesterId === me().id || (isProxy() && reqScoped(r));
+  const isRequesterOrProxy = (r) => r.requesterId === me().id || proxyOf(budgetById(r.budgetId));
   /** ข้อความสถานะของเอกสาร */
   function statusText(r) {
     if (r.status === 'approved') return 'ออกใบเบิกใช้งบแล้ว';
@@ -1774,7 +1787,7 @@
     const structure = setup ? (v.structure || 'items') : 'items'; // Business / ธุรการ: แยก Item เสมอ — งบรวมเป็นของผู้คุมงบ (ต้องแตกเป็น Item ก่อนเปิดใช้)
     const projItem = structure === 'project' && v.items[0] ? v.items[0] : {};
     const rows = structure !== 'project' && v.items.length ? mainItems(v) : [{}];
-    const requesters = USERS.filter(canRequestUser);
+    const requesters = USERS.filter(canRequestUser).filter((x) => setup || !isProxy() || (me().proxyFor || []).includes(x.id)); // ธุรการเลือกได้เฉพาะ Business ที่ถูกแท็ก
     const field = (label, inner, extra) => '<label class="field"' + (extra || '') + '><span>' + label + '</span>' + inner + '</label>';
     const select = (name, inner, attrs) => '<div class="select-wrap"><select name="' + name + '"' + (attrs || '') + '>' + inner + '</select></div>';
     /** ชื่อช่องตามไฟล์ Governance: CAPEX / OPEX ใช้ชื่อต่างกัน (สลับตามประเภทงบที่เลือก) */
@@ -2177,8 +2190,8 @@
     if (state !== 'cancelled' && ((acts && can('budget.create')) || (!can('budget.create') && can('budget.manage')))) actions.push('<a class="btn" href="#/budget/new?copy=' + b.id + '">คัดลอกเป็นงบใหม่</a>');
     const setupEdit = b.setup && waitingOpen(b) && can('budget.manage');
     if (setupEdit) actions.push('<a class="btn" href="#/budget/' + b.id + '/edit">แก้ไขงบ</a>');
-    if (openFlow(b) && groupLead(b).openMemo && b.type === 'CAPEX' && (own || canViewAll())) actions.push('<a class="btn" href="#/budget/' + b.id + '/memo' + (canEditOpenMemo(groupLead(b)) ? '' : '?view=1') + '">Memo ขอดำเนินการใช้งบ</a>');
-    if (!b.setup && (own || canViewAll())) actions.push('<a class="btn" href="#/budget/' + b.id + '/form">พิมพ์แบบฟอร์มขออนุมัติ</a>');
+    if (openFlow(b) && groupLead(b).openMemo && b.type === 'CAPEX' && (own || canViewAll() || actsFor(b))) actions.push('<a class="btn" href="#/budget/' + b.id + '/memo' + (canEditOpenMemo(groupLead(b)) ? '' : '?view=1') + '">Memo ขอดำเนินการใช้งบ</a>');
+    if (!b.setup && (own || canViewAll() || actsFor(b))) actions.push('<a class="btn" href="#/budget/' + b.id + '/form">พิมพ์แบบฟอร์มขออนุมัติ</a>');
     if (manageSub) actions.push('<a class="btn" href="#/budget/' + b.id + '/items">จัดการ Item ย่อย</a>');
     if (canEditGl(b)) actions.push('<a class="btn" href="#/budget/' + b.id + '/gl">ใส่ GL Code</a>');
     if (canPlanCashflow(b)) actions.push('<a class="btn" href="#/budget/' + b.id + '/cashflow">' + (hasCashflow(b) ? 'แก้ไข Plan Cashflow' : 'วาง Plan Cashflow') + '</a>');
@@ -4245,7 +4258,7 @@
     const single = !perLine;
     // ทำซ้ำรายการเบิก: คัดลอกคำขอเดิมของตนเอง (งบเดียวกัน) มาเป็นร่างฟอร์มใหม่ — ได้เลขที่คำขอใหม่เมื่อส่ง
     const src = !existing && params.get('copy') ? requestById(params.get('copy')) : null;
-    const dup = src && src.budgetId === b.id && (src.requesterId === u.id || (isProxy() && budgetScoped(b))) ? src : null;
+    const dup = src && src.budgetId === b.id && (src.requesterId === u.id || proxyOf(b)) ? src : null;
     const dupLines = dup ? dup.lines.map((l) => Object.assign({}, l, { itemId: perLine && !itemById(b, l.itemId) ? '' : l.itemId }, { supplier: l.supplier || dup.payee || '' })) : null;
     const v = existing || (dup ? { itemId: isProject ? b.items[0].id : '', useType: dup.useType || 'prpo', purpose: dup.purpose, payee: dup.payee, paymentPlan: dup.paymentPlan }
       : { itemId: params.get('item') || (isProject ? b.items[0].id : ''), useType: 'prpo' });
@@ -4728,7 +4741,7 @@
 
   function viewRequests() {
     const u = me();
-    const list = canViewAll() ? db.requests.filter(reqScoped) : db.requests.filter((r) => r.requesterId === u.id);
+    const list = canViewAll() ? db.requests.filter(reqScoped) : db.requests.filter((r) => r.requesterId === u.id || proxyOf(budgetById(r.budgetId)));
     return '<div class="page-head"><h1>' + 'รายการเบิกใช้งบ' + '</h1></div>' + takeFlash() + requestTable(list, true);
   }
 
@@ -4943,7 +4956,7 @@
     const u = me();
     const step = currentStep(r);
     const isCapex = true; // ชื่อเดิม: OPEX ใช้ขั้นตอนเดียวกับ CAPEX จึงเป็น true เสมอ
-    const isOwner = r.requesterId === u.id || (isProxy() && reqScoped(r));
+    const isOwner = r.requesterId === u.id || proxyOf(b);
 
     // ---- ปุ่มคำสั่งของหน้า (อยู่บนหัวหน้า เห็นได้ทันที)
     const actions = [];
@@ -5380,7 +5393,7 @@
   /** ผู้บริหารที่ลงนามอนุมัติ Memo = รายชื่อผู้พิจารณาอนุมัติใน Memo */
   const memoSigners = (r) => memoDocOf(memoModel(budgetById(r.budgetId), r)).approvers.join(' / ');
   /** ผู้ขอแก้ไข Memo ได้ระหว่างรอแนบ Memo ที่เซ็นแล้ว */
-  const canEditMemo = (r) => r.status === 'memo' && (r.requesterId === me().id || (isProxy() && reqScoped(r))) && can('request.create');
+  const canEditMemo = (r) => r.status === 'memo' && (r.requesterId === me().id || proxyOf(budgetById(r.budgetId))) && can('request.create');
 
   /** หน้า Memo ของคำขอ (#/request/:id/memo) — กรอกตามโครงเอกสาร · ?view=1 = ฉบับพิมพ์ */
   function viewRequestMemo(id, params) {
@@ -5704,7 +5717,7 @@
     const monthly = '<section class="card"><div class="section-head"><h2 class="section-title">ตัดงบรายเดือน (6 เดือนล่าสุด)</h2></div>' + chart + '</section>';
 
     // ---- งานที่ต้องทำ
-    const mineReq = db.requests.filter((r) => r.requesterId === u.id || (isProxy() && reqScoped(r)));
+    const mineReq = db.requests.filter((r) => r.requesterId === u.id || proxyOf(budgetById(r.budgetId)));
     const task = (label, n, href, note) => '<li><a href="' + href + '"><span>' + label + (note ? '<small>' + note + '</small>' : '') + '</span><b class="' + (n ? 'has' : '') + '">' + n + '</b></a></li>';
     const tasks = [];
     if (can('budget.verify')) {
@@ -6185,7 +6198,7 @@
     const c = changeById(id);
     if (!c) return notFound();
     const b = budgetById(c.budgetId);
-    const own = c.createdBy === me().id || (isProxy() && chgScoped(c));
+    const own = c.createdBy === me().id || proxyOf(budgetById(c.budgetId));
     const editable = own && ['draft', 'returned'].includes(c.state);
     const actions = [];
     if (editable) {
@@ -6498,8 +6511,8 @@
     }
     if (has('budget.create') || has('request.create')) {
       const mineB = db.budgets.filter(actsFor);
-      const mineR = db.requests.filter((r) => r.requesterId === u.id || (isProxy() && reqScoped(r)));
-      const mineC = (db.changes || []).filter((c) => c.createdBy === u.id || (isProxy() && chgScoped(c)));
+      const mineR = db.requests.filter((r) => r.requesterId === u.id || proxyOf(budgetById(r.budgetId)));
+      const mineC = (db.changes || []).filter((c) => c.createdBy === u.id || proxyOf(budgetById(c.budgetId)));
       add('toopen', 'งบรอขอดำเนินการใช้งบ', true, 'งบ CAPEX ประจำปีที่ผู้คุมงบลงไว้ให้คุณ — ทำ Memo ขอดำเนินการใช้งบ ให้ผู้บริหารเซ็น แนบไฟล์ที่เซ็นแล้วส่งให้ผู้คุมงบยืนยัน',
         [sec('', mineB.filter((b) => b.state === 'pending_open' && b.ownerId === u.id), openPickTable)]);
       add('fix', 'ส่งกลับแก้ไข', true, 'ผู้คุมงบส่งกลับพร้อมเหตุผล — แก้ไขแล้วส่งใหม่ หรือยกเลิก', [
@@ -6616,6 +6629,8 @@
       roleKeys().map((k) => '<label class="chip"><input type="checkbox" name="roles" value="' + esc(k) + '"> ' + esc(ROLE_LABEL[k] || k) + '</label>').join('') + '</div></div>' +
       '<div class="field full" id="coField"><span>บริษัทที่ดูงบ / งานได้ (ผู้คุมงบ · จัดซื้อ — เลือกได้หลายบริษัท)</span><div class="actions" id="coChecks">' +
       db.master.companies.map((c) => '<label class="chip"><input type="checkbox" name="companies" value="' + esc(c.code) + '"> ' + esc(c.code) + '</label>').join('') + '</div></div>' +
+      '<div class="field full" id="proxyField" style="display:none"><span>ช่วยงานให้ Business (ธุรการ — เห็นและทำแทนเฉพาะงบของคนที่เลือก · ไม่เลือกเลย = ไม่เห็นงบของใคร)</span><div class="actions" id="proxyChecks">' +
+      USERS.filter((x) => canRequestUser(x) && x.active !== false).sort((a, b) => String(a.name).localeCompare(String(b.name), 'th')).map((x) => '<label class="chip"><input type="checkbox" name="proxyFor" value="' + esc(x.id) + '"> ' + esc(x.name) + (x.department ? ' · ' + esc(x.department) : '') + '</label>').join('') + '</div></div>' +
       '</div><div class="muted section-hint" id="userFormHint">ผู้ดูแลระบบไม่ตั้งรหัสผ่านให้ — ผู้ใช้เข้าหน้าล็อกอิน → "' + (AUTH_REMOTE ? 'เปิดใช้ครั้งแรก' : 'ตั้งรหัสผ่าน') + '" แล้วกรอกอีเมลนี้เพื่อตั้งรหัสผ่านเอง</div>' +
       '<div class="actions"><button class="btn primary" type="submit">บันทึก</button><button class="btn" type="button" data-user-cancel>ยกเลิก</button></div></form></div></div></div>';
     const rows = USERS.map((u) => {
@@ -6814,6 +6829,12 @@
     const errModal = (m) => { document.getElementById('userFormError').innerHTML = '<div class="alert error" role="alert">' + esc(m) + '</div>'; card.querySelector('.viewer-form').scrollTop = 0; };
     const closeForm = () => { card.hidden = true; document.getElementById('userFormError').innerHTML = ''; document.removeEventListener('keydown', onEsc); };
     const onEsc = (e) => { if (e.key === 'Escape') closeForm(); };
+    // ช่อง "ช่วยงานให้ Business" แสดงเมื่อเลือกบทบาทที่มีสิทธิ์ทำแทน Business (business.proxy)
+    const syncProxyField = () => {
+      const on = Array.from(form.querySelectorAll('[name=roles]:checked')).some((c) => (DEMO_ROLE_PERMS[c.value] || []).includes('business.proxy'));
+      document.getElementById('proxyField').style.display = on ? '' : 'none';
+    };
+    form.addEventListener('change', (e) => { if (e.target && e.target.name === 'roles') syncProxyField(); });
     const openForm = (u) => {
       editId = u ? u.id : '';
       form.reset();
@@ -6830,6 +6851,9 @@
       form.querySelectorAll('[name=roles]').forEach((c) => { c.checked = rs.includes(c.value); });
       const cos = u ? (Array.isArray(u.companies) ? u.companies : []) : [];
       form.querySelectorAll('[name=companies]').forEach((c) => { c.checked = cos.includes(c.value); });
+      const pfs = u && Array.isArray(u.proxyFor) ? u.proxyFor : [];
+      form.querySelectorAll('[name=proxyFor]').forEach((c) => { c.checked = pfs.includes(c.value); });
+      syncProxyField();
       card.hidden = false;
       document.addEventListener('keydown', onEsc);
       form.elements.email.readOnly = !!(AUTH_REMOTE && u); // อีเมลผูกกับบัญชีล็อกอิน แก้ไม่ได้
@@ -6848,6 +6872,8 @@
       const data = { email: f.email.value, name: f.name.value, title: f.title.value, department: f.department.value, company: f.company.value,
         roles: Array.from(form.querySelectorAll('[name=roles]:checked')).map((c) => c.value),
         companies: Array.from(form.querySelectorAll('[name=companies]:checked')).map((c) => c.value) };
+      // ธุรการ: รายชื่อ Business ที่ช่วย (ส่งเฉพาะเมื่อช่องนี้แสดงอยู่ — ไม่งั้นคงค่าเดิม)
+      if (document.getElementById('proxyField').style.display !== 'none') data.proxyFor = Array.from(form.querySelectorAll('[name=proxyFor]:checked')).map((c) => c.value);
       if (!data.roles.length) { errModal('เลือกบทบาทอย่างน้อย 1 บทบาท'); return; }
       const sees = roleSeesWork(data.roles);
       if (sees && !data.roles.includes('admin') && !data.companies.length) { errModal('เลือกบริษัทที่ดูงบ / งานได้อย่างน้อย 1 บริษัท — บทบาทนี้เห็นงานของบริษัทตามที่กำหนด'); return; }

@@ -3,7 +3,7 @@
 \set ON_ERROR_STOP on
 
 insert into auth.users (id, email)
-select ('00000000-0000-0000-0000-0000000000' || lpad(g::text, 2, '0'))::uuid, 'u' || g || '@example.com' from generate_series(1, 11) g;
+select ('00000000-0000-0000-0000-0000000000' || lpad(g::text, 2, '0'))::uuid, 'u' || g || '@example.com' from generate_series(1, 12) g;
 -- 01 admin · 02 ผู้คุมงบ PBI · 03 ผู้คุมงบ PCC · 04 จัดซื้อ PBI · 05 business1 · 06 business2 · 07 ผู้คุมงบที่ปิดใช้งาน · 08 ผู้คุมงบไม่มีบริษัท
 insert into public.v2_profiles (id, email, name, role, companies, active) values
   ('00000000-0000-0000-0000-000000000001', 'u1@example.com', 'Admin', 'admin', '{}', true),
@@ -16,7 +16,10 @@ insert into public.v2_profiles (id, email, name, role, companies, active) values
   ('00000000-0000-0000-0000-000000000008', 'u8@example.com', 'NoCo', 'controller', '{}', true),
   ('00000000-0000-0000-0000-000000000009', 'u9@example.com', 'AstPBI', 'assistant', '{PBI}', true),
   ('00000000-0000-0000-0000-000000000010', 'u10@example.com', 'AccPBI', 'accountant', '{PBI}', true),
-  ('00000000-0000-0000-0000-000000000011', 'u11@example.com', 'AstPCC', 'assistant', '{PCC}', true);
+  ('00000000-0000-0000-0000-000000000011', 'u11@example.com', 'AstPCC', 'assistant', '{PCC}', true),
+  ('00000000-0000-0000-0000-000000000012', 'u12@example.com', 'AstNoTag', 'assistant', '{PBI}', true);
+-- ธุรการแท็กตามชื่อ Business: 09 และ 11 ช่วย Biz1 (05) · 12 ไม่ถูกแท็กใคร
+update public.v2_profiles set proxy_for = array['00000000-0000-0000-0000-000000000005'] where id in ('00000000-0000-0000-0000-000000000009', '00000000-0000-0000-0000-000000000011');
 grant usage on schema public to anon, authenticated;
 
 create or replace function pg_temp.as_user(n int) returns void language plpgsql as $$
@@ -158,6 +161,17 @@ select pg_temp.ok((select by_id::text from public.v2_log where action = 'ปล�
 set role authenticated;
 
 -- ---------------------------------------------------------------- ธุรการ (business.proxy) และบัญชี (gl.manage)
+-- แท็กตามชื่อ Business: ธุรการ 09 ช่วยเฉพาะ Biz1 (05) — งบของ Biz2 (06) ไม่เห็น ทำแทนไม่ได้ · ธุรการที่ไม่ถูกแท็ก (12) ไม่เห็นอะไรเลย
+select pg_temp.as_user(6);
+select public.v2_save_docs('[{"kind":"budget","id":"bZ","version":0,"data":{"company":"PBI","ownerId":"00000000-0000-0000-0000-000000000006","code":"Z","state":"draft"}}]');
+select pg_temp.as_user(9);
+select pg_temp.ok(pg_temp.ids(public.v2_load(), 'budget') not like '%bZ%', 'ธุรการที่แท็ก Biz1 ไม่เห็นงบของ Biz2');
+select pg_temp.expect_fail($$select public.v2_save_docs('[{"kind":"budget","id":"bZ","version":1,"data":{"company":"PBI","ownerId":"00000000-0000-0000-0000-000000000006","code":"Z","by":"ast"}}]')$$, 'ธุรการแก้งบของ Business ที่ไม่ได้แท็กไม่ได้', 'ไม่มีสิทธิ์');
+select pg_temp.expect_fail($$select public.v2_save_docs('[{"kind":"budget","id":"bZ2","version":0,"data":{"company":"PBI","ownerId":"00000000-0000-0000-0000-000000000006","code":"Z2"}}]')$$, 'ธุรการสร้างงบให้ Business ที่ไม่ได้แท็กไม่ได้', 'ไม่มีสิทธิ์');
+select pg_temp.as_user(12);
+select pg_temp.ok(pg_temp.ids(public.v2_load(), 'budget') = '', 'ธุรการที่ยังไม่ถูกแท็กใคร ไม่เห็นงบเลย');
+select pg_temp.as_user(11);
+select pg_temp.ok(pg_temp.ids(public.v2_load(), 'budget') = '', 'ธุรการ PCC (แท็ก Biz1 แต่คนละบริษัท) ไม่เห็นงบ PBI');
 select pg_temp.as_user(9);
 select pg_temp.ok(pg_temp.ids(public.v2_load(), 'budget') like '%b1%', 'ธุรการ PBI เห็นงบของ Business ในบริษัทตัวเอง');
 select pg_temp.as_user(11);
